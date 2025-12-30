@@ -37,7 +37,7 @@ async fn main() -> Result<(), String> {
     debug!("Initialized logger");
     let path = match Args::try_parse() {
         Ok(a) => a.path,
-        Err(_) => String::from("sample_data.json"),
+        Err(_) => String::from("sample_data/test.json"),
     };
 
     if let Ok(_) = File::create_new(&path) {
@@ -62,6 +62,7 @@ async fn main() -> Result<(), String> {
     .run()
     .await
     .unwrap();
+
     Ok(())
 }
 
