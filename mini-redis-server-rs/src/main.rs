@@ -35,8 +35,10 @@ async fn main() -> Result<(), String> {
         .init();
 
     debug!("Initialized logger");
-    let args = Args::parse();
-    let path = args.path;
+    let path = match Args::try_parse() {
+        Ok(a) => a.path,
+        Err(_) => String::from("sample_data.json"),
+    };
 
     if let Ok(_) = File::create_new(&path) {
         tokio::fs::write(&path, "{}").await.unwrap();
