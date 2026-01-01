@@ -14,6 +14,8 @@ use serde_json::{Number, json};
 use tokio::{
     fs,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    select,
+    task::JoinSet,
 };
 
 use serde::{Deserialize, Serialize};
@@ -21,7 +23,6 @@ const CONFIG_PATH_STR: &str = "./data/config.json";
 
 #[tokio::main]
 async fn main() {
-    let config_path = path::Path::new(CONFIG_PATH_STR);
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Debug)
         .target(env_logger::Target::Stdout)
@@ -53,11 +54,23 @@ async fn main() {
     )
     .await;
 
-    tokio::time::sleep(Duration::new(5, 0)).await;
-
     data.write(
         "rand_number_2",
         serde_json::Value::Number(Number::from_f64(rand::rng().random()).unwrap()),
     )
     .await;
+
+    info!("Completed startup");
+
+    tokio::spawn(async move {
+        // Start application loop
+    });
+    // Wait to terminate
+    tokio::signal::ctrl_c().await.unwrap();
+    info!("Starting graceful shutdown");
+    let mut js = JoinSet::new();
+    js.spawn(async move {
+        data.close().await;
+    });
+    js.join_all().await;
 }

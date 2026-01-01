@@ -26,6 +26,7 @@ impl JsonFileHandler {
             .create(true)
             .write(true)
             .read(true)
+            .share_mode(0)
             .open(path)
             .await
             .unwrap();
@@ -71,14 +72,9 @@ impl JsonFileHandler {
         self.file.write_all(&data).await.unwrap();
         self.file.flush().await.unwrap();
     }
-}
 
-impl Drop for JsonFileHandler {
-    fn drop(&mut self) {
-        // TODO: Implement Async Drop somehow for graceful shutdown
-
-        // let buf = serde_json::to_vec_pretty(&config).unwrap();
-        // writer.write_all(&buf).await.unwrap();
-        // writer.flush().await.unwrap();
+    pub async fn close(&mut self) {
+        self.file.flush().await.unwrap();
+        self.file.shutdown().await.unwrap();
     }
 }
