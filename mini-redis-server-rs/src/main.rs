@@ -47,7 +47,6 @@ async fn main() {
         .await
         .unwrap();
 
-    let closed = Arc::new(Mutex::new(false));
     // TODO: Find way to cancel accept() and read()
 
     // Accept new connections
