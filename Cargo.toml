@@ -1,5 +1,9 @@
 [workspace]
-members = ["mini-redis-server-rs", "mini-redis-client-rs"]
+members = [
+    "mini-redis-server-rs",
+    "mini-redis-client-rs",
+    "mini-redis-common-rs",
+]
 resolver = "3"
 
 

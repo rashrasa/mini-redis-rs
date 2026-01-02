@@ -5,7 +5,7 @@
 // 4. Listen for insert, read, delete requests
 // 5. Perform operations atomically
 
-use std::{path, time::Duration};
+use std::{path, sync::Arc, time::Duration};
 
 use log::info;
 use mini_redis_server_rs::file::json_handler;
@@ -13,8 +13,10 @@ use rand::Rng;
 use serde_json::{Number, json};
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufStream, BufWriter},
+    net::TcpListener,
     select,
+    sync::Mutex,
     task::JoinSet,
 };
 
@@ -45,25 +47,28 @@ async fn main() {
         .await
         .unwrap();
 
-    data.write("test", serde_json::Value::String("test value".into()))
-        .await;
+    let closed = Arc::new(Mutex::new(false));
+    // TODO: Find way to cancel accept() and read()
 
-    data.write(
-        "rand_number_1",
-        serde_json::Value::Number(Number::from_f64(rand::rng().random()).unwrap()),
-    )
-    .await;
-
-    data.write(
-        "rand_number_2",
-        serde_json::Value::Number(Number::from_f64(rand::rng().random()).unwrap()),
-    )
-    .await;
-
-    info!("Completed startup");
-
+    // Accept new connections
     tokio::spawn(async move {
-        // Start application loop
+        let listener: TcpListener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+        info!("Completed startup");
+        loop {
+            let (conn_stream, conn_addr) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                // Handle each connection
+                let (conn_stream, conn_addr) = (conn_stream, conn_addr);
+                let mut buf_stream = BufReader::new(conn_stream);
+                info!("Received new connection: {}", conn_addr);
+                loop {
+                    let mut msg: String = "".into();
+                    buf_stream.read_to_string(&mut msg).await.unwrap();
+                    buf_stream.flush().await.unwrap();
+                    info!("Received tcp message:\n{}", msg);
+                }
+            });
+        }
     });
     // Wait to terminate
     tokio::signal::ctrl_c().await.unwrap();
