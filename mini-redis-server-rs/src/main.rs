@@ -79,11 +79,13 @@ async fn main() {
                                         }
                                         else {
                                             info!("{} no longer writing, terminating", conn_addr);
+                                            conn_stream.shutdown().await.unwrap();
                                             break;
                                         }
                                     }
                                 }
                                 _ = cancellation_token.cancelled() => {
+                                    conn_stream.shutdown().await.unwrap();
                                     info!("Server closed, Connection to {} terminated", conn_addr);
                                     break;
                                 }
@@ -93,6 +95,7 @@ async fn main() {
                 }
 
                 _ = cancellation_token.cancelled() => {
+                    drop(listener);
                     break;
                 }
             }
