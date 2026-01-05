@@ -79,7 +79,6 @@ async fn main() {
                                         }
                                         else {
                                             info!("{} no longer writing, terminating", conn_addr);
-                                            drop(conn_stream);
                                             break;
                                         }
                                     }
