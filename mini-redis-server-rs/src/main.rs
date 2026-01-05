@@ -46,35 +46,71 @@ async fn main() {
     let mut data = json_handler::JsonFileHandler::from_path(&data_path)
         .await
         .unwrap();
-
+    
     // TODO: Find way to cancel accept() and read()
-
+    let cancellation_token = tokio_util::sync::CancellationToken::new();
+    
     // Accept new connections
+    let cancel_accept = cancellation_token.clone();
     tokio::spawn(async move {
+        let cancellation_token = cancel_accept;
         let listener: TcpListener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
         info!("Completed startup");
         loop {
-            let (conn_stream, conn_addr) = listener.accept().await.unwrap();
-            tokio::spawn(async move {
-                // Handle each connection
-                let (conn_stream, conn_addr) = (conn_stream, conn_addr);
-                let mut buf_stream = BufReader::new(conn_stream);
-                info!("Received new connection: {}", conn_addr);
-                loop {
-                    let mut msg: String = "".into();
-                    buf_stream.read_to_string(&mut msg).await.unwrap();
-                    buf_stream.flush().await.unwrap();
-                    info!("Received tcp message:\n{}", msg);
+            select! {
+                result = listener.accept() => {
+                    let  (conn_stream, conn_addr) = result.unwrap();
+                    let conn_cancel = cancellation_token.clone();
+                    tokio::spawn(async move {
+                        // Handle each connection
+                        info!("Received new connection: {}", conn_addr);
+
+                        let cancellation_token = conn_cancel.clone();
+                        
+                        let (mut conn_stream, conn_addr) = (conn_stream, conn_addr);
+                        let mut buffer: [u8;1024] = [0;1024];
+                        loop {
+                            select!{
+                                _ = conn_stream.readable() => {
+                                    if let Ok(bytes_received) = conn_stream.try_read(&mut buffer) {
+                                        if bytes_received > 0 {
+                                            conn_stream.flush().await.unwrap();
+                                            info!("Received tcp message: \n{}\nSize: {} bytes", str::from_utf8(&buffer[0..bytes_received]).unwrap().replace("\r\n", "").replace("\n", ""), bytes_received);
+                                        }
+                                        else {
+                                            info!("{} no longer writing, terminating", conn_addr);
+                                            drop(conn_stream);
+                                            break;
+                                        }
+                                    }
+                                }
+                                _ = cancellation_token.cancelled() => {
+                                    info!("Server closed, Connection to {} terminated", conn_addr);
+                                    break;
+                                }
+                            }
+                        }
+                });
                 }
-            });
+
+                _ = cancellation_token.cancelled() => {
+                    break;
+                }
+            }
+            
+            
         }
     });
     // Wait to terminate
     tokio::signal::ctrl_c().await.unwrap();
     info!("Starting graceful shutdown");
+    cancellation_token.cancel();
     let mut js = JoinSet::new();
     js.spawn(async move {
         data.close().await;
+    });
+    js.spawn(async move {
+        config.close().await;
     });
     js.join_all().await;
 }
