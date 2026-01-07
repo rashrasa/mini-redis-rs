@@ -1869,6 +1869,7 @@ name = "mini-redis-server-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "clap",
  "env_logger",
  "log",
