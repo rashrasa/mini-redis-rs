@@ -1897,14 +1897,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mini-redis-common-rs"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "mini-redis-server-rs"
 version = "0.1.0"
 dependencies = [
