@@ -6,8 +6,9 @@
 // 5. Perform operations atomically
 
 use log::info;
-use mini_redis_server_rs::{file::json_handler, server::Server};
+use mini_redis_server_rs::{Request, file::json_handler, server::ServerHandler};
 
+use serde_json::{Number, Value};
 use tokio::task::JoinSet;
 
 const CONFIG_PATH_STR: &str = "./data/config.json";
@@ -31,19 +32,23 @@ async fn main() {
         },
         None => "data/data.json".into(),
     };
+    info!(
+        "{}",
+        serde_json::to_string(&Request::Insert(
+            "Key_a".into(),
+            Value::Number(Number::from_f64(3.2).unwrap())
+        ))
+        .unwrap()
+    );
+    let mut server = ServerHandler::spawn(&data_path).await.unwrap();
 
-    let mut data = json_handler::JsonFileHandler::from_path(&data_path)
-        .await
-        .unwrap();
-
-    let mut server = Server::spawn().await.unwrap();
     // Wait to terminate
     tokio::signal::ctrl_c().await.unwrap();
     info!("Starting graceful shutdown");
-    server.shutdown();
+
     let mut js = JoinSet::new();
     js.spawn(async move {
-        data.close().await;
+        server.shutdown().await;
     });
     js.spawn(async move {
         config.close().await;

@@ -1,12 +1,11 @@
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use log::info;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::{
     fs::{self, File},
-    io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
-    sync::{Mutex, RwLock},
+    io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader},
+    sync::RwLock,
 };
 
 /// Handles JSON files. Allows reading, writing, deleting keys.
@@ -49,20 +48,20 @@ impl JsonFileHandler {
 
 // Operations
 impl JsonFileHandler {
-    pub async fn write(&mut self, key: &str, value: Value) {
-        (*self.data.write().await).insert(key.to_string(), value); // lock dropped
-
+    pub async fn write(&mut self, key: &str, value: Value) -> Option<Value> {
+        let result = (*self.data.write().await).insert(key.to_string(), value); // lock dropped
         self.sync().await;
+        result
     }
 
     pub async fn read(&mut self, key: &str) -> Option<Value> {
         (*self.data.read().await).get(key).cloned()
     }
 
-    pub async fn delete(&mut self, key: &str) {
-        (*self.data.write().await).remove(key); // lock dropped
-
+    pub async fn delete(&mut self, key: &str) -> Option<Value> {
+        let result = (*self.data.write().await).remove(key); // lock dropped
         self.sync().await;
+        result
     }
 
     pub async fn sync(&mut self) {
