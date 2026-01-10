@@ -1,23 +1,17 @@
 use core::f64;
 use std::{
-    error::Error,
-    fmt::format,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use mini_redis_server_rs::Request;
 use rand::RngCore;
 use serde_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        TcpStream,
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
-    sync::{Mutex, RwLock, mpsc::Sender},
+    net::tcp::OwnedReadHalf,
+    sync::RwLock,
     time::Instant,
 };
 use tokio_util::bytes::BufMut;
@@ -84,13 +78,13 @@ async fn progressive_stress_test() {
 
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
 
-    let mut window_fulfilled_request_count: Arc<RwLock<usize>> = Arc::new(RwLock::new(0));
+    let window_fulfilled_request_count: Arc<RwLock<usize>> = Arc::new(RwLock::new(0));
 
     let mut connection_pool_sender_channels =
         Vec::<tokio::sync::mpsc::Sender<Vec<u8>>>::with_capacity(NUM_CONNECTIONS);
 
     info!("Creating reader and writer tasks");
-    for i in 0..NUM_CONNECTIONS {
+    for _ in 0..NUM_CONNECTIONS {
         let (receiver, sender) = tokio::net::TcpStream::connect(CONNECT_TO)
             .await
             .unwrap()

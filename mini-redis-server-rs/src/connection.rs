@@ -1,8 +1,8 @@
 use std::{collections::VecDeque, io::Write, net::SocketAddr, sync::Arc};
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::Mutex,
 };
