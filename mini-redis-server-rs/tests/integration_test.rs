@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mini_redis_server_rs::Request;
 use rand::RngCore;
 use serde_json::Value;
@@ -22,19 +22,18 @@ use tokio::{
 };
 use tokio_util::bytes::BufMut;
 
-const CONNECT_TO: SocketAddr =
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 23245));
+const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 3000));
 const TOLERANCE: f64 = 1e-2;
-const INITIAL_N: u64 = 10;
+const INITIAL_N: u64 = 50;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 1;
+const NUM_CONNECTIONS: usize = 20;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BUFFER_SIZES: usize = 1024 * 10;
 
-async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; 1024]) {
+async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; BUFFER_SIZES]) {
     let mut is_end_of_line = false;
     let mut data: Vec<u8> = vec![];
 
@@ -57,6 +56,10 @@ async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; 1
 
 #[tokio::test]
 async fn progressive_stress_test() {
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .target(env_logger::Target::Stdout)
+        .init();
     // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
     // 1. Connect successfully to server on a consistent machine (get hardware info)
     // 2. Start sending n requests per second and wait for response rate to stabilize
@@ -67,23 +70,20 @@ async fn progressive_stress_test() {
     let mut rng = rand::rng();
     let request_store: Vec<Vec<u8>> = (0..REQUEST_STORE_SIZE)
         .map(|i| {
-            serde_json::to_vec(&Request::Insert(
+            let mut data = serde_json::to_vec(&Request::Insert(
                 format!("request_{}", i),
                 rng.next_u64().into(),
             ))
-            .unwrap()
+            .unwrap();
+            data.push('\n' as u8);
+            data
         })
         .collect();
 
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
 
-    let mut request_rate: u64 = INITIAL_N;
     let mut window_fulfilled_request_count: Arc<RwLock<usize>> = Arc::new(RwLock::new(0));
-    let mut windows_decreasing: usize = 0;
-    let mut i: usize = 0;
 
-    let mut connection_pool_receiver_channels =
-        Vec::<tokio::sync::mpsc::Receiver<()>>::with_capacity(NUM_CONNECTIONS);
     let mut connection_pool_sender_channels =
         Vec::<tokio::sync::mpsc::Sender<Vec<u8>>>::with_capacity(NUM_CONNECTIONS);
 
@@ -104,16 +104,15 @@ async fn progressive_stress_test() {
             loop {
                 let request = rx.recv().await.unwrap();
 
-                sender
-                    .write_all(serde_json::to_vec(&request).unwrap().as_slice())
-                    .await
-                    .unwrap();
+                sender.write_all(&request).await.unwrap();
+                sender.flush().await.unwrap();
+                debug!("Sent request");
             }
         });
         let window_fulfilled_request_count_task = window_fulfilled_request_count.clone();
         tokio::spawn(async move {
             let window_fulfilled_request_count = window_fulfilled_request_count_task;
-            let mut buffer: [u8; 1024] = [0; 1024];
+            let mut buffer: [u8; BUFFER_SIZES] = [0; BUFFER_SIZES];
             let mut receiver = receiver;
 
             loop {
@@ -123,15 +122,17 @@ async fn progressive_stress_test() {
         });
     }
 
-    info!(
-        "Starting stress test at {} requests per second",
-        request_rate
-    );
-
+    let mut request_rate: u64 = INITIAL_N;
+    let mut windows_decreasing: usize = 0;
     let mut behind: f64 = 0.0; // number of requests behind as a float
     let mut last_behind: f64 = f64::INFINITY; // last "behind" count to see if machine or implementation is too slow for stress testing
     let mut last = Instant::now();
     let mut i: usize = 0;
+
+    info!(
+        "Starting stress test at {} requests per second",
+        request_rate
+    );
     loop {
         behind += last.elapsed().as_secs_f64() * (request_rate as f64);
         last = Instant::now();
@@ -147,7 +148,7 @@ async fn progressive_stress_test() {
             }
             // Send request
             connection_pool_sender_channels
-                .get(i & NUM_CONNECTIONS)
+                .get(i % NUM_CONNECTIONS)
                 .unwrap()
                 .send(request_store.get(i % REQUEST_STORE_SIZE).unwrap().clone())
                 .await

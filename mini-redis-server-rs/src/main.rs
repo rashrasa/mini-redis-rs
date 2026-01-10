@@ -5,11 +5,18 @@
 // 4. Listen for insert, read, delete requests
 // 5. Perform operations atomically
 
+use std::sync::Arc;
+
 use log::info;
-use mini_redis_server_rs::{Request, file::json_handler, server::ServerHandler};
+use mini_redis_server_rs::{
+    Request, ServerState,
+    connection::ConnectionHandler,
+    file::json_handler::{self, JsonFileHandler},
+};
 
 use serde_json::{Number, Value};
-use tokio::task::JoinSet;
+use tokio::{net::TcpListener, sync::Mutex, task::JoinSet};
+use tokio_util::future::FutureExt;
 
 const CONFIG_PATH_STR: &str = "./data/config.json";
 
@@ -40,16 +47,35 @@ async fn main() {
         ))
         .unwrap()
     );
-    let mut server = ServerHandler::spawn(&data_path).await.unwrap();
+    let cancellation_token = tokio_util::sync::CancellationToken::new();
+
+    let data = JsonFileHandler::from_path(&data_path).await.unwrap();
+    let state = Arc::new(Mutex::new(ServerState { data }));
+    let tcp_listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+
+    let cancellation_token_task = cancellation_token.clone();
+
+    let _ = tokio::spawn(async move {
+        let cancellation_token = cancellation_token_task;
+
+        info!("Completed startup");
+        loop {
+            // Accept new connections
+            let (tcp_stream, tcp_addr) = tcp_listener.accept().await.unwrap();
+
+            ConnectionHandler::spawn(tcp_stream, tcp_addr, state.clone(), &cancellation_token)
+                .await;
+        }
+    })
+    .with_cancellation_token(&cancellation_token);
 
     // Wait to terminate
     tokio::signal::ctrl_c().await.unwrap();
     info!("Starting graceful shutdown");
+    cancellation_token.cancel();
 
     let mut js = JoinSet::new();
-    js.spawn(async move {
-        server.shutdown().await;
-    });
+
     js.spawn(async move {
         config.close().await;
     });

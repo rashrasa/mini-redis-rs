@@ -1,7 +1,6 @@
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
-use log::{error, info};
-use serde_json::Value;
+use log::{debug, error, info};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -9,11 +8,12 @@ use tokio::{
 };
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 
-use crate::{Request, server::ServerState};
+use crate::{Error, Request, ServerState};
 
 pub struct TcpStreamHandler {
     source: TcpStream,
     buffer: [u8; 1024],
+    request_queue: Vec<Result<Request, Error>>,
 }
 
 impl TcpStreamHandler {
@@ -21,27 +21,31 @@ impl TcpStreamHandler {
         Self {
             source: source,
             buffer: [0; 1024],
+            request_queue: Vec::with_capacity(16),
         }
     }
-    pub async fn next_request(&mut self) -> Result<Request, Box<dyn Error>> {
+    pub async fn next_request(&mut self) -> Result<Request, Error> {
         let mut is_end_of_line = false;
         let mut data: Vec<u8> = vec![];
 
         while !is_end_of_line {
-            if let Ok(n) = self.source.read(&mut self.buffer).await {
-                if n == 0 {
-                    info!("Stream closed");
-                    break;
-                }
-                data.append(&mut self.buffer[0..n].into());
+            let n = self.source.read(&mut self.buffer).await?;
 
-                is_end_of_line = char::from(self.buffer[n - 1]) == '\n';
-            } else {
-                error!("An error occurred");
-            };
+            if n == 0 {
+                info!("Stream closed");
+                break;
+            }
+            data.append(&mut self.buffer[0..n].into());
+
+            is_end_of_line = char::from(self.buffer[n - 1]) == '\n';
         }
-
-        Ok(serde_json::from_slice(&data)?)
+        let req = str::from_utf8(&data).unwrap();
+        debug!("{}", req);
+        req.split("\n").for_each(|s| {
+            self.request_queue
+                .push(serde_json::from_str::<Request>(s).map_err(|e| Error::SerdeJsonError(e)))
+        });
+        self.request_queue.pop().unwrap() // currently assuming that a request always exists at this point
     }
 
     pub async fn write_all(&mut self, src: &[u8]) -> Result<(), std::io::Error> {
@@ -52,7 +56,6 @@ impl TcpStreamHandler {
         self.source.shutdown().await.unwrap();
     }
 }
-
 pub struct ConnectionHandler;
 impl ConnectionHandler {
     /// Spawns a tokio task which handles this connection and can be managed with [cancellation_token].
@@ -66,17 +69,38 @@ impl ConnectionHandler {
             // Handle each connection
             info!("Received new connection: {}", tcp_addr);
 
-            let tcp_stream_handler = Arc::new(Mutex::new(TcpStreamHandler::new(tcp_stream)));
+            let mut tcp_stream_handler = TcpStreamHandler::new(tcp_stream);
 
             loop {
-                let request = {
-                    match tcp_stream_handler.lock().await.next_request().await {
+                let request: Request = {
+                    match tcp_stream_handler.next_request().await {
                         Ok(req) => req,
-                        Err(e) => {
-                            let message = format!("Could not parse request {}", e);
-                            error!("{}", message);
-                            continue;
-                        }
+                        Err(error) => match error {
+                            Error::StdIoError(e) => match e.kind() {
+                                std::io::ErrorKind::NotFound
+                                | std::io::ErrorKind::PermissionDenied
+                                | std::io::ErrorKind::ConnectionRefused
+                                | std::io::ErrorKind::ConnectionReset
+                                | std::io::ErrorKind::HostUnreachable
+                                | std::io::ErrorKind::NetworkUnreachable
+                                | std::io::ErrorKind::ConnectionAborted
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::StorageFull => {
+                                    info!("Stream was closed: {}", e);
+                                    break;
+                                }
+                                _ => {
+                                    let message = format!("Could not parse request {}", e);
+                                    error!("{}", message);
+                                    continue;
+                                }
+                            },
+                            _ => {
+                                let message = format!("Could not parse request {}", error);
+                                error!("{}", message);
+                                continue;
+                            }
+                        },
                     }
                 };
 
@@ -86,8 +110,6 @@ impl ConnectionHandler {
                     Request::Read(key) => state.lock().await.read(&key).await,
                 };
                 tcp_stream_handler
-                    .lock()
-                    .await
                     .write_all((serde_json::to_string_pretty(&response).unwrap() + "\n").as_bytes())
                     .await
                     .unwrap();
