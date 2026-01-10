@@ -8,6 +8,8 @@ use crate::file::json_handler::JsonFileHandler;
 pub mod connection;
 pub mod file;
 
+const TCP_STREAM_MAX_FAILED_READS: usize = 5;
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Request {
     Insert(String, Value),
@@ -43,9 +45,9 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::CrateError(error) => error.fmt(f),
-            Error::StdIoError(error) => error.fmt(f),
-            Error::SerdeJsonError(error) => error.fmt(f),
+            Error::CrateError(error) => write!(f, "Error: {}", error),
+            Error::StdIoError(error) => write!(f, "StdIoError: {}", error),
+            Error::SerdeJsonError(error) => write!(f, "SerdeJsonError: {}", error),
         }
     }
 }

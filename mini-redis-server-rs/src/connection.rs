@@ -1,19 +1,19 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::VecDeque, io::Write, net::SocketAddr, sync::Arc};
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
     sync::Mutex,
 };
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 
-use crate::{Error, Request, ServerState};
+use crate::{Error, Request, ServerState, TCP_STREAM_MAX_FAILED_READS};
 
 pub struct TcpStreamHandler {
     source: TcpStream,
     buffer: [u8; 1024],
-    request_queue: Vec<Result<Request, Error>>,
+    read_bytes: VecDeque<u8>,
 }
 
 impl TcpStreamHandler {
@@ -21,31 +21,39 @@ impl TcpStreamHandler {
         Self {
             source: source,
             buffer: [0; 1024],
-            request_queue: Vec::with_capacity(16),
+            read_bytes: VecDeque::with_capacity(4096),
         }
     }
     pub async fn next_request(&mut self) -> Result<Request, Error> {
-        let mut is_end_of_line = false;
-        let mut data: Vec<u8> = vec![];
+        let line: Vec<u8> = {
+            loop {
+                let mut line: Option<Vec<u8>> = None;
+                for i in 0..self.read_bytes.len() {
+                    let byte = self.read_bytes.get(i).unwrap();
+                    if *byte == '\n' as u8 {
+                        line = Some(self.read_bytes.drain(0..=i).collect());
+                        break;
+                    }
+                }
+                if let Some(l) = line {
+                    break l;
+                }
+                self.source.readable().await.unwrap();
+                let n = self.source.read(&mut self.buffer).await?;
 
-        while !is_end_of_line {
-            let n = self.source.read(&mut self.buffer).await?;
-
-            if n == 0 {
-                info!("Stream closed");
-                break;
+                if n == 0 {
+                    self.shutdown().await;
+                    return Err(Error::CrateError(
+                        "Unable to read bytes, closing stream.".into(),
+                    ));
+                }
+                self.read_bytes.write_all(&mut self.buffer[0..n]).unwrap();
             }
-            data.append(&mut self.buffer[0..n].into());
+        };
 
-            is_end_of_line = char::from(self.buffer[n - 1]) == '\n';
-        }
-        let req = str::from_utf8(&data).unwrap();
-        debug!("{}", req);
-        req.split("\n").for_each(|s| {
-            self.request_queue
-                .push(serde_json::from_str::<Request>(s).map_err(|e| Error::SerdeJsonError(e)))
-        });
-        self.request_queue.pop().unwrap() // currently assuming that a request always exists at this point
+        debug!("{:?}", String::from_utf8_lossy(&line));
+
+        Ok(serde_json::from_slice(&line)?)
     }
 
     pub async fn write_all(&mut self, src: &[u8]) -> Result<(), std::io::Error> {
@@ -147,9 +155,9 @@ mod test {
     #[tokio::test]
     async fn next_request_parses_simple_request() {
         let req = Request::Read("test\n".into());
-        let mut handler = TcpStreamHandler::new(
-            create_mock_source(&mut serde_json::to_vec(&req).unwrap().as_slice(), 12345).await,
-        );
+        let mut data = serde_json::to_vec(&req).unwrap();
+        data.push('\n' as u8);
+        let mut handler = TcpStreamHandler::new(create_mock_source(&mut data, 12345).await);
 
         assert_eq!(handler.next_request().await.unwrap(), req);
         handler.shutdown().await;

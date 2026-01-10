@@ -134,6 +134,10 @@ async fn progressive_stress_test() {
         request_rate
     );
     loop {
+        info!(
+            "Fulfilled {} requests",
+            window_fulfilled_request_count.read().await
+        );
         behind += last.elapsed().as_secs_f64() * (request_rate as f64);
         last = Instant::now();
 
