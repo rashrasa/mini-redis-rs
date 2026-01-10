@@ -23,8 +23,10 @@ use tokio::{
 use tokio_util::bytes::BufMut;
 
 const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 3000));
-const TOLERANCE: f64 = 1e-2;
-const INITIAL_N: u64 = 50;
+
+const STABILITY_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
+const WITHIN_N_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
+const INITIAL_N: f64 = 100.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
@@ -87,6 +89,7 @@ async fn progressive_stress_test() {
     let mut connection_pool_sender_channels =
         Vec::<tokio::sync::mpsc::Sender<Vec<u8>>>::with_capacity(NUM_CONNECTIONS);
 
+    info!("Creating reader and writer tasks");
     for i in 0..NUM_CONNECTIONS {
         let (receiver, sender) = tokio::net::TcpStream::connect(CONNECT_TO)
             .await
@@ -94,8 +97,6 @@ async fn progressive_stress_test() {
             .into_split();
         let (tx_data, rx_data) = tokio::sync::mpsc::channel::<Vec<u8>>(BUFFER_SIZES);
         connection_pool_sender_channels.push(tx_data);
-
-        info!("Creating reader and writer tasks");
 
         // Request sender task
         tokio::spawn(async move {
@@ -106,7 +107,6 @@ async fn progressive_stress_test() {
 
                 sender.write_all(&request).await.unwrap();
                 sender.flush().await.unwrap();
-                debug!("Sent request");
             }
         });
         let window_fulfilled_request_count_task = window_fulfilled_request_count.clone();
@@ -122,11 +122,14 @@ async fn progressive_stress_test() {
         });
     }
 
-    let mut request_rate: u64 = INITIAL_N;
-    let mut windows_decreasing: usize = 0;
+    let mut request_rate: f64 = INITIAL_N;
+    let mut windows_not_increasing: usize = 0;
+    let mut window_average_handled: [f64; PATIENCE] = [0.0; PATIENCE];
+    let mut last_avg_fulfilled_count: f64 = 0.0;
     let mut behind: f64 = 0.0; // number of requests behind as a float
     let mut last_behind: f64 = f64::INFINITY; // last "behind" count to see if machine or implementation is too slow for stress testing
     let mut last = Instant::now();
+    let mut last_check = Instant::now();
     let mut i: usize = 0;
 
     info!(
@@ -134,10 +137,6 @@ async fn progressive_stress_test() {
         request_rate
     );
     loop {
-        info!(
-            "Fulfilled {} requests",
-            window_fulfilled_request_count.read().await
-        );
         behind += last.elapsed().as_secs_f64() * (request_rate as f64);
         last = Instant::now();
 
@@ -163,5 +162,45 @@ async fn progressive_stress_test() {
         }
 
         // Evaluate performance and stopping condition
+        if last_check.elapsed().as_secs_f64() > EVAL_WINDOW_SECONDS {
+            let mut fulfilled = window_fulfilled_request_count.write().await;
+            let avg_fulfilled = *fulfilled as f64 / EVAL_WINDOW_SECONDS;
+            info!(
+                "Average requests fulfilled per second for current window: {}",
+                avg_fulfilled
+            );
+            if avg_fulfilled < last_avg_fulfilled_count + STABILITY_TOLERANCE {
+                last_avg_fulfilled_count = avg_fulfilled;
+                window_average_handled[windows_not_increasing] = avg_fulfilled;
+                windows_not_increasing += 1;
+                if windows_not_increasing >= PATIENCE {
+                    // average requests fulfillment rate has stabilized
+                    if avg_fulfilled >= request_rate - WITHIN_N_TOLERANCE {
+                        // stabilized around N
+                        request_rate *= 2.0;
+                        windows_not_increasing = 0;
+                        info!(
+                            "Requests handled / second stabilized around {:.4}, increasing request rate to {}",
+                            window_average_handled.iter().sum::<f64>() / PATIENCE as f64,
+                            request_rate
+                        )
+                    } else {
+                        // stabilized outside N
+                        info!(
+                            "Requests handled / second saturated around {:.4}, stopping stress test.",
+                            window_average_handled.iter().sum::<f64>() / PATIENCE as f64
+                        );
+                        return;
+                    }
+                }
+            } else {
+                last_avg_fulfilled_count = avg_fulfilled;
+                windows_not_increasing = 0;
+            }
+
+            last_check = Instant::now();
+            *fulfilled = 0;
+        }
+        tokio::task::yield_now().await;
     }
 }

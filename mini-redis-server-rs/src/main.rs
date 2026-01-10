@@ -23,7 +23,7 @@ const CONFIG_PATH_STR: &str = "./data/config.json";
 #[tokio::main]
 async fn main() {
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
         .target(env_logger::Target::Stdout)
         .init();
 

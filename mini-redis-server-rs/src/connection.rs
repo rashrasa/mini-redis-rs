@@ -8,7 +8,7 @@ use tokio::{
 };
 use tokio_util::{future::FutureExt, sync::CancellationToken};
 
-use crate::{Error, Request, ServerState, TCP_STREAM_MAX_FAILED_READS};
+use crate::{Error, Request, ServerState};
 
 pub struct TcpStreamHandler {
     source: TcpStream,
@@ -43,9 +43,10 @@ impl TcpStreamHandler {
 
                 if n == 0 {
                     self.shutdown().await;
-                    return Err(Error::CrateError(
-                        "Unable to read bytes, closing stream.".into(),
-                    ));
+                    return Err(Error::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "Unable to read bytes, closing stream.",
+                    )));
                 }
                 self.read_bytes.write_all(&mut self.buffer[0..n]).unwrap();
             }

@@ -8,8 +8,6 @@ use crate::file::json_handler::JsonFileHandler;
 pub mod connection;
 pub mod file;
 
-const TCP_STREAM_MAX_FAILED_READS: usize = 5;
-
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Request {
     Insert(String, Value),
