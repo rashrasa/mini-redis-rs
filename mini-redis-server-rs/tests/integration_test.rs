@@ -26,7 +26,7 @@ const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(12
 
 const STABILITY_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
-const INITIAL_N: f64 = 100.0;
+const INITIAL_N: f64 = 2000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
@@ -125,7 +125,7 @@ async fn progressive_stress_test() {
     let mut request_rate: f64 = INITIAL_N;
     let mut windows_not_increasing: usize = 0;
     let mut window_average_handled: [f64; PATIENCE] = [0.0; PATIENCE];
-    let mut last_avg_fulfilled_count: f64 = 0.0;
+    let mut max_avg_fulfilled_count: f64 = 0.0;
     let mut behind: f64 = 0.0; // number of requests behind as a float
     let mut last_behind: f64 = f64::INFINITY; // last "behind" count to see if machine or implementation is too slow for stress testing
     let mut last = Instant::now();
@@ -166,11 +166,10 @@ async fn progressive_stress_test() {
             let mut fulfilled = window_fulfilled_request_count.write().await;
             let avg_fulfilled = *fulfilled as f64 / EVAL_WINDOW_SECONDS;
             info!(
-                "Average requests fulfilled per second for current window: {}",
+                "Average requests fulfilled per second for current window: {:.2}",
                 avg_fulfilled
             );
-            if avg_fulfilled < last_avg_fulfilled_count + STABILITY_TOLERANCE {
-                last_avg_fulfilled_count = avg_fulfilled;
+            if avg_fulfilled < max_avg_fulfilled_count + STABILITY_TOLERANCE {
                 window_average_handled[windows_not_increasing] = avg_fulfilled;
                 windows_not_increasing += 1;
                 if windows_not_increasing >= PATIENCE {
@@ -180,21 +179,21 @@ async fn progressive_stress_test() {
                         request_rate *= 2.0;
                         windows_not_increasing = 0;
                         info!(
-                            "Requests handled / second stabilized around {:.4}, increasing request rate to {}",
+                            "Requests handled / second stabilized around {:.2}, increasing request rate to {}",
                             window_average_handled.iter().sum::<f64>() / PATIENCE as f64,
                             request_rate
                         )
                     } else {
                         // stabilized outside N
                         info!(
-                            "Requests handled / second saturated around {:.4}, stopping stress test.",
+                            "Requests handled / second saturated around {:.2}, stopping stress test.",
                             window_average_handled.iter().sum::<f64>() / PATIENCE as f64
                         );
                         return;
                     }
                 }
             } else {
-                last_avg_fulfilled_count = avg_fulfilled;
+                max_avg_fulfilled_count = avg_fulfilled;
                 windows_not_increasing = 0;
             }
 

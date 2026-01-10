@@ -118,10 +118,16 @@ impl ConnectionHandler {
                     Request::Delete(key) => state.lock().await.delete(&key).await,
                     Request::Read(key) => state.lock().await.read(&key).await,
                 };
-                tcp_stream_handler
+                if let Err(e) = tcp_stream_handler
                     .write_all((serde_json::to_string_pretty(&response).unwrap() + "\n").as_bytes())
                     .await
-                    .unwrap();
+                {
+                    error!(
+                        "Could not write to stream: {}, closing connection at {}",
+                        e, tcp_addr
+                    );
+                    return;
+                }
             }
         })
         .with_cancellation_token(cancellation_token);
