@@ -2,32 +2,34 @@ use core::f64;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
+    time::Duration,
 };
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mini_redis_server_rs::Request;
 use rand::RngCore;
 use serde_json::Value;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::OwnedReadHalf,
-    sync::RwLock,
+    select,
+    sync::{Mutex, RwLock},
     time::Instant,
 };
 use tokio_util::bytes::BufMut;
 
 const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 3000));
 
-const STABILITY_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
-const WITHIN_N_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
-const INITIAL_N: f64 = 10000.0;
+const STABILITY_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
+const WITHIN_N_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
+const INITIAL_N: f64 = 100000000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 24;
+const NUM_CONNECTIONS: usize = 100;
 const REQUEST_STORE_SIZE: usize = 1024;
-const BUFFER_SIZES: usize = 1024 * 10;
+const BUFFER_SIZES: usize = 1024 * 1;
 
 async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; BUFFER_SIZES]) {
     let mut is_end_of_line = false;
@@ -87,6 +89,8 @@ async fn progressive_stress_test() {
         Vec::<tokio::sync::mpsc::Sender<Vec<u8>>>::with_capacity(NUM_CONNECTIONS);
 
     info!("Creating reader and writer tasks");
+    let (requests_sent_count_tx, mut requests_sent_count_rx) =
+        tokio::sync::mpsc::channel::<()>(1024);
     for _ in 0..NUM_CONNECTIONS {
         let (receiver, sender) = tokio::net::TcpStream::connect(CONNECT_TO)
             .await
@@ -96,7 +100,9 @@ async fn progressive_stress_test() {
         connection_pool_sender_channels.push(tx_data);
 
         // Request sender task
+        let task_requests_sent_count_tx = requests_sent_count_tx.clone();
         tokio::spawn(async move {
+            let requests_sent_count_tx = task_requests_sent_count_tx;
             let mut rx = rx_data;
             let mut sender = sender;
             loop {
@@ -104,6 +110,7 @@ async fn progressive_stress_test() {
 
                 sender.write_all(&request).await.unwrap();
                 sender.flush().await.unwrap();
+                requests_sent_count_tx.send(()).await.unwrap();
             }
         });
         let window_fulfilled_request_count_task = window_fulfilled_request_count.clone();
@@ -133,11 +140,29 @@ async fn progressive_stress_test() {
         "Starting stress test at {} requests per second",
         request_rate
     );
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::new(1, 0));
+        let mut count = 0u64;
+        loop {
+            select! {
+                _ = interval.tick() => {
+                    info!("Requests sent: {}", count);
+                }
+                _ = requests_sent_count_rx.recv() => {
+                    count+=1;
+                }
+            };
+        }
+    });
+
+    // TODO: Fix 'while behind' loop to eventually yield if too busy, then set 'last_behind' value
     loop {
         behind += last.elapsed().as_secs_f64() * (request_rate as f64);
         last = Instant::now();
 
         while behind > 1.0 {
+            debug!("Behind {}, last {}", behind, last_behind);
             if behind > last_behind + 5.0 {
                 // padding of 5.0 to filter out small fluctuations
                 warn!(

@@ -82,8 +82,8 @@ async fn main() {
     });
 
     // Wait to terminate
-    tokio::time::sleep(Duration::new(30, 0)).await;
-    //tokio::signal::ctrl_c().await.unwrap();
+    // tokio::time::sleep(Duration::new(30, 0)).await;
+    tokio::signal::ctrl_c().await.unwrap();
     info!("Starting graceful shutdown");
 
     cancellation_token.cancel();
