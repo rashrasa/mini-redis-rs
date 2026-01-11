@@ -31,6 +31,10 @@ impl ServerState {
     pub async fn delete(&mut self, key: &str) -> Option<Value> {
         self.data.delete(key).await
     }
+
+    pub async fn sync(&mut self) {
+        self.data.sync().await;
+    }
 }
 
 #[derive(Debug)]

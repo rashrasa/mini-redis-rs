@@ -20,12 +20,12 @@ const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(12
 
 const STABILITY_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 10.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
-const INITIAL_N: f64 = 2000.0;
+const INITIAL_N: f64 = 10000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 20;
+const NUM_CONNECTIONS: usize = 24;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BUFFER_SIZES: usize = 1024 * 10;
 
@@ -61,6 +61,9 @@ async fn progressive_stress_test() {
     // 2. Start sending n requests per second and wait for response rate to stabilize
     // 3. If response rate ~ n, double n, else end test and record metrics
     // 4. Plot results using matplotlib
+
+    warn!("Initializing tokio-console");
+    console_subscriber::init();
 
     info!("Creating request store");
     let mut rng = rand::rng();

@@ -49,19 +49,15 @@ impl JsonFileHandler {
 // Operations
 impl JsonFileHandler {
     pub async fn write(&mut self, key: &str, value: Value) -> Option<Value> {
-        let result = (*self.data.write().await).insert(key.to_string(), value); // lock dropped
-        self.sync().await;
-        result
+        self.data.write().await.insert(key.to_string(), value)
     }
 
     pub async fn read(&mut self, key: &str) -> Option<Value> {
-        (*self.data.read().await).get(key).cloned()
+        self.data.read().await.get(key).cloned()
     }
 
     pub async fn delete(&mut self, key: &str) -> Option<Value> {
-        let result = (*self.data.write().await).remove(key); // lock dropped
-        self.sync().await;
-        result
+        self.data.write().await.remove(key)
     }
 
     pub async fn sync(&mut self) {

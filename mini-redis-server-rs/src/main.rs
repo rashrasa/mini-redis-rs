@@ -5,20 +5,23 @@
 // 4. Listen for insert, read, delete requests
 // 5. Perform operations atomically
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use log::info;
+use log::{info, warn};
 use mini_redis_server_rs::{
     Request, ServerState,
     connection::ConnectionHandler,
     file::json_handler::{self, JsonFileHandler},
 };
+use tokio::select;
 
 use serde_json::{Number, Value};
 use tokio::{net::TcpListener, sync::Mutex, task::JoinSet};
-use tokio_util::future::FutureExt;
 
 const CONFIG_PATH_STR: &str = "./data/config.json";
+
+// TODO: Accept command-line arguments for testing (timer instead of ctrl-c to close), server config, etc.
+// TODO: memory -> file sync policy
 
 #[tokio::main]
 async fn main() {
@@ -26,6 +29,9 @@ async fn main() {
         .filter_level(log::LevelFilter::Info)
         .target(env_logger::Target::Stdout)
         .init();
+
+    warn!("Initializing tokio-console");
+    console_subscriber::init();
 
     info!("Reading config");
     let mut config = json_handler::JsonFileHandler::from_path(CONFIG_PATH_STR)
@@ -55,24 +61,34 @@ async fn main() {
 
     let cancellation_token_task = cancellation_token.clone();
 
+    let state_task = state.clone();
     let _ = tokio::spawn(async move {
+        let state = state_task;
         let cancellation_token = cancellation_token_task;
 
         info!("Completed startup");
         loop {
-            // Accept new connections
-            let (tcp_stream, tcp_addr) = tcp_listener.accept().await.unwrap();
-
-            ConnectionHandler::spawn(tcp_stream, tcp_addr, state.clone(), &cancellation_token)
-                .await;
+            select! {
+                // Accept new connections
+                result = tcp_listener.accept() => {
+                    let (tcp_stream, tcp_addr) = result.unwrap();
+                    ConnectionHandler::spawn(tcp_stream, tcp_addr, state.clone(), &cancellation_token).await;
+                }
+                _ = cancellation_token.cancelled() => {
+                    break;
+                }
+            };
         }
-    })
-    .with_cancellation_token(&cancellation_token);
+    });
 
     // Wait to terminate
-    tokio::signal::ctrl_c().await.unwrap();
+    tokio::time::sleep(Duration::new(30, 0)).await;
+    //tokio::signal::ctrl_c().await.unwrap();
     info!("Starting graceful shutdown");
+
     cancellation_token.cancel();
+
+    state.lock().await.sync().await;
 
     let mut js = JoinSet::new();
 
