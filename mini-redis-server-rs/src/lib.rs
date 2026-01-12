@@ -7,6 +7,7 @@ use crate::file::json_handler::JsonFileHandler;
 
 pub mod connection;
 pub mod file;
+pub mod profiling;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Request {

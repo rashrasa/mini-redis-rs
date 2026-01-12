@@ -1,0 +1,57 @@
+{
+  "Timestamp (UTC)": "2026-01-12T17:35:01Z",
+  "Commit ID": "53a4ff480b857b8aa074637c8169a08b29b21d27",
+  "docs": [
+    "All averages and peaks are calculated using a <EVAL_WINDOW_SECONDS> sliding window for peaks/averages sampled at <SAMPLING_RATE> Hz"
+  ],
+  "global_consts": {
+    "EVAL_WINDOW_SECONDS": 5.0,
+    "SAMPLING RATE": 60
+  },
+  "test_consts": {
+    "STABILITY_TOLERANCE": 100.0,
+    "WITHIN_N_TOLERANCE": 100.0,
+    "BEHIND_TOLERANCE": 100.0,
+    "INITIAL_N": 1000.0,
+    "PATIENCE": 5,
+    "NUM_CONNECTIONS": 1000,
+    "REQUEST_STORE_SIZE": 1024,
+    "BUFFER_SIZES": 1024
+  },
+  "server_machine": {
+    "OS": "",
+    "CPU Model": "",
+    "Total Cores Available": 16,
+    "Total Memory Available (GB)": 16.0,
+    "Average Pre-Test CPU Load (%)": 0.0,
+    "Average Pre-Test Memory Usage (%)": 0.2
+  },
+  "test_machine": {
+    "OS": "",
+    "CPU Model": "",
+    "Total Cores Available": 16,
+    "Total Memory Available (GB)": 16.0,
+    "Average Pre-Test CPU Load (%)": 0.0,
+    "Average Pre-Test Memory Usage (%)": 0.2
+  },
+  "test_stats": {
+    "Average Test CPU Load (%)": 1.0,
+    "P50 Test CPU Load (%)": 0.5,
+    "P90 Test CPU Load (%)": 0.6,
+    "P99 Test CPU Load (%)": 1.0,
+    "Average Tokio Task Idle Time (%)": 0.8,
+    "P50 Tokio Task Idle Time (%)": 0.8,
+    "P90 Tokio Task Idle Time (%)": 0.8,
+    "P99 Tokio Task Idle Time (%)": 0.8,
+    "Average Network Latency (ms)": 12,
+    "P50 Network Latency (ms)": 12,
+    "P90 Network Latency (ms)": 12,
+    "P99 Network Latency (ms)": 12,
+    "Average Tokio Task Size (bytes)": 9422,
+    "Average Tokio Task Count": 24,
+    "End Number of Rows": 1024,
+    "End Average Size of Rows (bytes)": 86,
+    "Peak Response Rate (/s)": 100000,
+    "Peak Memory Usage (%)": 0.4
+  }
+}
