@@ -22,12 +22,13 @@ const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(12
 
 const STABILITY_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
-const INITIAL_N: f64 = 100000000.0;
+const BEHIND_TOLERANCE: f64 = 100.0;
+const INITIAL_N: f64 = 1000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 100;
+const NUM_CONNECTIONS: usize = 1000;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BUFFER_SIZES: usize = 1024 * 1;
 
@@ -55,7 +56,7 @@ async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; B
 #[tokio::test]
 async fn progressive_stress_test() {
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
         .target(env_logger::Target::Stdout)
         .init();
     // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
@@ -84,6 +85,7 @@ async fn progressive_stress_test() {
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
 
     let window_fulfilled_request_count: Arc<RwLock<usize>> = Arc::new(RwLock::new(0));
+    let total_fulfilled_request_count: Arc<RwLock<usize>> = Arc::new(RwLock::new(0));
 
     let mut connection_pool_sender_channels =
         Vec::<tokio::sync::mpsc::Sender<Vec<u8>>>::with_capacity(NUM_CONNECTIONS);
@@ -114,14 +116,17 @@ async fn progressive_stress_test() {
             }
         });
         let window_fulfilled_request_count_task = window_fulfilled_request_count.clone();
+        let total_fulfilled_request_count_task = total_fulfilled_request_count.clone();
         tokio::spawn(async move {
             let window_fulfilled_request_count = window_fulfilled_request_count_task;
+            let total_fulfilled_request_count = total_fulfilled_request_count_task;
             let mut buffer: [u8; BUFFER_SIZES] = [0; BUFFER_SIZES];
             let mut receiver = receiver;
 
             loop {
                 read_and_dump_result(&mut receiver, &mut buffer).await;
                 *window_fulfilled_request_count.write().await += 1;
+                *total_fulfilled_request_count.write().await += 1;
             }
         });
     }
@@ -147,7 +152,7 @@ async fn progressive_stress_test() {
         loop {
             select! {
                 _ = interval.tick() => {
-                    info!("Requests sent: {}", count);
+                    info!("Requests sent: {}, Responses received: {}", count, total_fulfilled_request_count.read().await);
                 }
                 _ = requests_sent_count_rx.recv() => {
                     count+=1;
@@ -162,15 +167,13 @@ async fn progressive_stress_test() {
         last = Instant::now();
 
         while behind > 1.0 {
-            debug!("Behind {}, last {}", behind, last_behind);
-            if behind > last_behind + 5.0 {
-                // padding of 5.0 to filter out small fluctuations
+            if behind > last_behind + BEHIND_TOLERANCE {
                 warn!(
                     "Request \"behind\" count increased: {} -> {}. Use a different machine or close other processes if this continues.",
                     last_behind, behind
                 );
-                last_behind = behind;
             }
+            last_behind = behind;
             // Send request
             connection_pool_sender_channels
                 .get(i % NUM_CONNECTIONS)
