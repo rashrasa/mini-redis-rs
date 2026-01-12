@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use log::warn;
 use tokio::{sync::Mutex, time::Instant};
 
 use crate::Error;
@@ -37,11 +38,14 @@ where
     /// 'sample' needs to return an owned type. It provides a Duration representing the amount of time since the thread was spawned.
     ///
     /// Use as low of a sampling rate as possible to minimize the performance footprint of data collection.
-    /// There is no guarantee that data points are exactly 1/hz seconds apart.
+    ///
+    /// There is no guarantee that data points are exactly 1/hz seconds apart. Samples may get dropped.
     /// This thread also sleeps between intervals.
     pub fn spawn(hz: u64, sample: Arc<dyn (Fn(Duration) -> T) + Send + Sync>) {
         std::thread::spawn(move || {
-            let mut samples: u64 = 0;
+            let mut _samples: u64 = 0;
+            let mut _dropped: u64 = 0;
+            let samples = |s: &u64, d: &u64| s + d;
             let mut data_store = Self {
                 data: vec![],
                 hz: hz,
@@ -52,17 +56,29 @@ where
             let start = &data_store.start;
             loop {
                 let elapsed = start.elapsed();
-                while elapsed.as_secs_f64() * hz as f64 > samples as f64 {
+                let behind =
+                    elapsed.as_secs_f64() * hz as f64 - samples(&_samples, &_dropped) as f64;
+                if behind > 1.0 {
                     data_store.data.push(TimestampedDataInstance {
                         data: (data_store.sample)(elapsed),
                         time: Instant::now(),
                     });
-                    samples += 1;
+                    _samples += 1;
+
+                    let to_drop = (behind - 1.0) as u64;
+                    if to_drop > 1 {
+                        _dropped += to_drop;
+                        warn!(
+                            "Dropped {} samples. Consider reducing the sampling rate if this continues to be a problem.",
+                            to_drop
+                        );
+                    }
                 }
                 std::thread::sleep(Duration::new(
                     0,
-                    (((((samples + 1) as f64) * 1.0 / hz as f64) - start.elapsed().as_secs_f64())
-                        * 10e9) as u32,
+                    (((((samples(&_samples, &_dropped) + 1) as f64) * 1.0 / hz as f64)
+                        - start.elapsed().as_secs_f64())
+                        * 1e9) as u32,
                 ))
             }
         });
