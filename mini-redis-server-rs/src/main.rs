@@ -7,6 +7,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use clap::Parser;
 use log::{info, warn};
 use mini_redis_server_rs::{
     Request, ServerState,
@@ -19,6 +20,7 @@ use serde_json::{Number, Value};
 use tokio::{net::TcpListener, sync::Mutex, task::JoinSet};
 
 const CONFIG_PATH_STR: &str = "./data/config.json";
+const ENV_NAME_PROFILE: &str = "MINI_REDIS_PROFILE"; // true -> profile mode, else -> not profile mode
 
 // TODO: Accept command-line arguments for testing (timer instead of ctrl-c to close), server config, etc.
 // TODO: memory -> file sync policy
@@ -30,8 +32,15 @@ async fn main() {
         .target(env_logger::Target::Stdout)
         .init();
 
-    warn!("Initializing tokio-console");
-    console_subscriber::init();
+    let profile = match std::env::var(ENV_NAME_PROFILE) {
+        Ok(v) => v.to_ascii_lowercase().trim() == "true",
+        Err(_) => false,
+    };
+
+    if profile {
+        warn!("Initializing tokio-console");
+        console_subscriber::init();
+    }
 
     info!("Reading config");
     let mut config = json_handler::JsonFileHandler::from_path(CONFIG_PATH_STR)

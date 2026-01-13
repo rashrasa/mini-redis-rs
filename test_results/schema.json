@@ -47,11 +47,11 @@
     "P50 Network Latency (ms)": 12,
     "P90 Network Latency (ms)": 12,
     "P99 Network Latency (ms)": 12,
-    "Average Tokio Task Size (bytes)": 9422,
+    "Average Tokio Task Size (GB)": 0.422,
     "Average Tokio Task Count": 24,
     "End Number of Rows": 1024,
-    "End Average Size of Rows (bytes)": 86,
+    "End Average Size of Rows (GB)": 0.086,
     "Peak Response Rate (/s)": 100000,
-    "Peak Memory Usage (%)": 0.4
+    "Peak Memory Usage (GB)": 4.2
   }
 }
