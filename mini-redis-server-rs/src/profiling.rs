@@ -11,6 +11,7 @@ use tokio::{sync::Mutex, time::Instant};
 
 use crate::Error;
 
+#[derive(Debug, Clone)]
 struct TimestampedDataInstance<T>
 where
     T: Send + Sync + Clone + 'static,
@@ -18,6 +19,7 @@ where
     data: T,
     time: Instant,
 }
+
 pub struct TimestampedData<T>
 where
     T: Send + Sync + Clone + 'static,
@@ -25,8 +27,24 @@ where
     data: Vec<TimestampedDataInstance<T>>,
     hz: u64,
     sample: Arc<dyn (Fn(Duration) -> T) + Send + Sync>,
-    sampling: Arc<Mutex<bool>>,
+    sampling: Arc<std::sync::Mutex<bool>>,
     start: Instant,
+}
+
+pub struct TimestampedDataHandler<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
+    data: Arc<std::sync::Mutex<TimestampedData<T>>>,
+}
+
+impl<T> TimestampedDataHandler<T>
+where
+    T: Send + Sync + Clone + 'static,
+{
+    pub fn data_mut(&mut self) -> &mut Arc<std::sync::Mutex<TimestampedData<T>>> {
+        &mut self.data
+    }
 }
 
 impl<T> TimestampedData<T>
@@ -41,26 +59,33 @@ where
     ///
     /// There is no guarantee that data points are exactly 1/hz seconds apart. Samples may get dropped.
     /// This thread also sleeps between intervals.
-    pub fn spawn(hz: u64, sample: Arc<dyn (Fn(Duration) -> T) + Send + Sync>) {
+    pub fn spawn(
+        hz: u64,
+        sample: Arc<dyn (Fn(Duration) -> T) + Send + Sync>,
+    ) -> TimestampedDataHandler<T> {
+        let data_store = Arc::new(std::sync::Mutex::new(Self {
+            data: vec![],
+            hz: hz,
+            sample: sample,
+            sampling: Arc::new(std::sync::Mutex::new(false)),
+            start: Instant::now(),
+        }));
+        let data_store_thread = data_store.clone();
         std::thread::spawn(move || {
             let mut _samples: u64 = 0;
             let mut _dropped: u64 = 0;
             let samples = |s: &u64, d: &u64| s + d;
-            let mut data_store = Self {
-                data: vec![],
-                hz: hz,
-                sample: sample,
-                sampling: Arc::new(Mutex::new(false)),
-                start: Instant::now(),
-            };
-            let start = &data_store.start;
+            let mut data_store = data_store_thread;
+            let start = data_store.lock().unwrap().start.clone();
             loop {
                 let elapsed = start.elapsed();
                 let behind =
                     elapsed.as_secs_f64() * hz as f64 - samples(&_samples, &_dropped) as f64;
                 if behind > 1.0 {
+                    let mut data_store = data_store.lock().unwrap();
+                    let sample = (data_store.sample)(elapsed);
                     data_store.data.push(TimestampedDataInstance {
-                        data: (data_store.sample)(elapsed),
+                        data: sample,
                         time: Instant::now(),
                     });
                     _samples += 1;
@@ -82,6 +107,7 @@ where
                 ))
             }
         });
+        TimestampedDataHandler { data: data_store }
     }
 
     fn get_iter_in(
@@ -110,7 +136,7 @@ where
     }
 
     pub fn stop(&mut self) {
-        *self.sampling.blocking_lock() = true;
+        *self.sampling.lock().unwrap() = true;
     }
     pub fn sort(&mut self) {
         self.data.sort()
@@ -195,5 +221,42 @@ where
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.time.cmp(&other.time)
+    }
+}
+
+mod tests {
+
+    use log::info;
+
+    use super::*;
+    #[derive(Clone, Debug)]
+    struct TestDataType {
+        field: f64,
+    }
+    #[test]
+    fn test_runs() {
+        let a = Arc::new(std::sync::Mutex::new(vec![]));
+        let a_thread = a.clone();
+        let mut handler = TimestampedData::spawn(
+            60,
+            Arc::new(move |t| {
+                let a = a_thread.clone();
+                a.lock().unwrap().push(t);
+                TestDataType {
+                    field: t.as_secs_f64(),
+                }
+            }),
+        );
+
+        loop {
+            if handler.data.lock().unwrap().data.len() < 20 {
+                std::thread::sleep(Duration::new(0, (0.167 * 1e9) as u32));
+            } else {
+                handler.data.lock().unwrap().stop();
+                break;
+            }
+        }
+        let data = handler.data.lock().unwrap().data.clone();
+        println!("Received: {}", data.len());
     }
 }
