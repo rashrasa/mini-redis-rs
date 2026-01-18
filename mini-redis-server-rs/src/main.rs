@@ -37,6 +37,8 @@ async fn main() {
         Err(_) => false,
     };
 
+    clearscreen::clear().unwrap();
+
     if profile {
         warn!("Initializing tokio-console");
         console_subscriber::init();
@@ -54,14 +56,7 @@ async fn main() {
         },
         None => "data/data.json".into(),
     };
-    info!(
-        "{}",
-        serde_json::to_string(&Request::Insert(
-            "Key_a".into(),
-            Value::Number(Number::from_f64(3.2).unwrap())
-        ))
-        .unwrap()
-    );
+
     let cancellation_token = tokio_util::sync::CancellationToken::new();
 
     let data = JsonFileHandler::from_path(&data_path).await.unwrap();

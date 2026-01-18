@@ -114,14 +114,26 @@ impl ConnectionHandler {
                 };
 
                 let response = match request {
-                    Request::Insert(key, value) => state.lock().await.write(&key, value).await,
-                    Request::Delete(key) => state.lock().await.delete(&key).await,
-                    Request::Read(key) => state.lock().await.read(&key).await,
+                    Request::Insert(key, value) => {
+                        "Old Value: ".to_string()
+                            + &serde_json::to_string_pretty(
+                                &state.lock().await.write(&key, value).await,
+                            )
+                            .unwrap()
+                            + "\n"
+                    }
+                    Request::Delete(key) => {
+                        "Old Value: ".to_string()
+                            + &serde_json::to_string_pretty(&state.lock().await.delete(&key).await)
+                                .unwrap()
+                            + "\n"
+                    }
+                    Request::Read(key) => {
+                        serde_json::to_string_pretty(&state.lock().await.read(&key).await).unwrap()
+                            + "\n"
+                    }
                 };
-                if let Err(e) = tcp_stream_handler
-                    .write_all((serde_json::to_string_pretty(&response).unwrap() + "\n").as_bytes())
-                    .await
-                {
+                if let Err(e) = tcp_stream_handler.write_all((response).as_bytes()).await {
                     error!(
                         "Could not write to stream: {}, closing connection at {}",
                         e, tcp_addr

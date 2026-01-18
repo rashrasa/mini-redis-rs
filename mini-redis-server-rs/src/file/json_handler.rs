@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use log::info;
+use log::{debug, info};
 use serde_json::Value;
 use tokio::{
     fs::{self, File},
@@ -33,7 +33,7 @@ impl JsonFileHandler {
         let mut reader = BufReader::new(config_file);
         reader.fill_buf().await.unwrap();
 
-        info!("Parsing config");
+        debug!("Parsing config");
         let data: HashMap<String, Value> =
             serde_json::from_reader(reader.buffer()).unwrap_or_default();
 
