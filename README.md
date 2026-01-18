@@ -1,4 +1,8 @@
-# (WIP) mini-redis-rs
+# mini-redis-rs
+
+![mini redis gif](https://github.com/user-attachments/assets/4b2c2a77-94b4-4bbc-a768-ff1e93c74b54)
+
+*Demo: Sending requests to server over TCP. Read data -> replaced field with new data -> re-opened server -> old data is still there.*
 
 Hosted in-memory key-value store accepting requests through TCP.
 
