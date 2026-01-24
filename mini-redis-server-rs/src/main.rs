@@ -58,10 +58,10 @@ async fn main() {
     };
 
     let cancellation_token = tokio_util::sync::CancellationToken::new();
-
+    let addr = "127.0.0.1:3000";
     let data = JsonFileHandler::from_path(&data_path).await.unwrap();
     let state = Arc::new(Mutex::new(ServerState { data }));
-    let tcp_listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let tcp_listener = TcpListener::bind(addr).await.unwrap();
 
     let cancellation_token_task = cancellation_token.clone();
 
@@ -71,6 +71,10 @@ async fn main() {
         let cancellation_token = cancellation_token_task;
 
         info!("Completed startup");
+        info!("Listening @ {}", addr);
+        info!(
+            "Try sending an Insert request using the client or with raw TCP with {{Insert: [\"<key>\", <value>]}}"
+        );
         loop {
             select! {
                 // Accept new connections
