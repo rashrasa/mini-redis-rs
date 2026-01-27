@@ -62,7 +62,10 @@ impl TcpStreamHandler {
     }
 
     pub async fn shutdown(&mut self) {
-        self.source.shutdown().await.unwrap();
+        match self.source.shutdown().await {
+            Ok(_) => {}
+            Err(e) => error!("Error shutting down connection: {}", e),
+        }
     }
 }
 pub struct ConnectionHandler;

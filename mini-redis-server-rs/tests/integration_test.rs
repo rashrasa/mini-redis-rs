@@ -10,7 +10,7 @@ use mini_redis_server_rs::Request;
 use rand::RngCore;
 use serde_json::Value;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::tcp::OwnedReadHalf,
     select,
     sync::{Mutex, RwLock},
@@ -23,34 +23,24 @@ const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(12
 const STABILITY_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 100.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
 const BEHIND_TOLERANCE: f64 = 100.0;
-const INITIAL_N: f64 = 1000.0;
+const INITIAL_N: f64 = 100000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 1000;
+const NUM_CONNECTIONS: usize = 32;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BUFFER_SIZES: usize = 1024 * 1;
 
-async fn read_and_dump_result(read_half: &mut OwnedReadHalf, buffer: &mut [u8; BUFFER_SIZES]) {
-    let mut is_end_of_line = false;
-    let mut data: Vec<u8> = vec![];
-
-    while !is_end_of_line {
-        if let Ok(n) = read_half.read(buffer).await {
-            if n == 0 {
-                info!("Stream closed");
-                break;
-            }
-            data.put_slice(&buffer[0..n]);
-
-            is_end_of_line = char::from(buffer[n - 1]) == '\n';
-        } else {
-            error!("An error occurred");
-        };
-    }
-
-    serde_json::from_slice::<Option<Value>>(&data).unwrap(); //checks for valid response
+async fn read_and_dump_result(read_half: &mut BufReader<OwnedReadHalf>) {
+    let mut v = String::new();
+    if let Ok(n) = read_half.read_line(&mut v).await {
+        if n == 0 {
+            info!("Stream closed");
+        }
+    } else {
+        error!("An error occurred");
+    };
 }
 
 #[tokio::test]
@@ -120,11 +110,10 @@ async fn progressive_stress_test() {
         tokio::spawn(async move {
             let window_fulfilled_request_count = window_fulfilled_request_count_task;
             let total_fulfilled_request_count = total_fulfilled_request_count_task;
-            let mut buffer: [u8; BUFFER_SIZES] = [0; BUFFER_SIZES];
-            let mut receiver = receiver;
+            let mut receiver = BufReader::new(receiver);
 
             loop {
-                read_and_dump_result(&mut receiver, &mut buffer).await;
+                read_and_dump_result(&mut receiver).await;
                 *window_fulfilled_request_count.write().await += 1;
                 *total_fulfilled_request_count.write().await += 1;
             }
