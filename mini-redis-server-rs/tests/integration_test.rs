@@ -28,7 +28,7 @@ const INITIAL_N: f64 = 100000.0;
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 32;
+const NUM_CONNECTIONS: usize = 16;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BUFFER_SIZES: usize = 1024 * 1;
 
@@ -60,17 +60,19 @@ async fn progressive_stress_test() {
 
     info!("Creating request store");
     let mut rng = rand::rng();
-    let request_store: Vec<Vec<u8>> = (0..REQUEST_STORE_SIZE)
-        .map(|i| {
-            let mut data = serde_json::to_vec(&Request::Insert(
-                format!("request_{}", i),
-                rng.next_u64().into(),
-            ))
-            .unwrap();
-            data.push('\n' as u8);
-            data
-        })
-        .collect();
+    let request_store: Arc<Vec<Vec<u8>>> = Arc::new(
+        (0..REQUEST_STORE_SIZE)
+            .map(|i| {
+                let mut data = serde_json::to_vec(&Request::Insert(
+                    format!("request_{}", i),
+                    rng.next_u64().into(),
+                ))
+                .unwrap();
+                data.push('\n' as u8);
+                data
+            })
+            .collect(),
+    );
 
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
 
@@ -120,14 +122,13 @@ async fn progressive_stress_test() {
         });
     }
 
-    let mut request_rate: f64 = INITIAL_N;
+    let mut request_rate: f64 = INITIAL_N / NUM_CONNECTIONS as f64;
     let mut windows_not_increasing: usize = 0;
     let mut window_average_handled: [f64; PATIENCE] = [0.0; PATIENCE];
     let mut max_avg_fulfilled_count: f64 = 0.0;
     let mut behind: f64 = 0.0; // number of requests behind as a float
     let mut last_behind: f64 = f64::INFINITY; // last "behind" count to see if machine or implementation is too slow for stress testing
     let mut last = Instant::now();
-    let mut last_check = Instant::now();
     let mut i: usize = 0;
 
     info!(
@@ -151,69 +152,74 @@ async fn progressive_stress_test() {
     });
 
     // TODO: Fix 'while behind' loop to eventually yield if too busy, then set 'last_behind' value
-    loop {
-        behind += last.elapsed().as_secs_f64() * (request_rate as f64);
-        last = Instant::now();
+    let request_store_task = request_store.clone();
+    while let Some(connection) = connection_pool_sender_channels.pop() {
+        let request_store = request_store_task.clone();
+        tokio::spawn(async move {
+            loop {
+                behind += last.elapsed().as_secs_f64() * (request_rate as f64);
+                last = Instant::now();
 
-        while behind > 1.0 {
-            if behind > last_behind + BEHIND_TOLERANCE {
-                warn!(
-                    "Request \"behind\" count increased: {} -> {}. Use a different machine or close other processes if this continues.",
-                    last_behind, behind
-                );
-            }
-            last_behind = behind;
-            // Send request
-            connection_pool_sender_channels
-                .get(i % NUM_CONNECTIONS)
-                .unwrap()
-                .send(request_store.get(i % REQUEST_STORE_SIZE).unwrap().clone())
-                .await
-                .unwrap();
-
-            i += 1;
-            behind -= 1.0;
-        }
-
-        // Evaluate performance and stopping condition
-        if last_check.elapsed().as_secs_f64() > EVAL_WINDOW_SECONDS {
-            let mut fulfilled = window_fulfilled_request_count.write().await;
-            let avg_fulfilled = *fulfilled as f64 / EVAL_WINDOW_SECONDS;
-            info!(
-                "Average requests fulfilled per second for current window: {:.2}",
-                avg_fulfilled
-            );
-            if avg_fulfilled < max_avg_fulfilled_count + STABILITY_TOLERANCE {
-                window_average_handled[windows_not_increasing] = avg_fulfilled;
-                windows_not_increasing += 1;
-                if windows_not_increasing >= PATIENCE {
-                    // average requests fulfillment rate has stabilized
-                    if avg_fulfilled >= request_rate - WITHIN_N_TOLERANCE {
-                        // stabilized around N
-                        request_rate *= 2.0;
-                        windows_not_increasing = 0;
-                        info!(
-                            "Requests handled / second stabilized around {:.2}, increasing request rate to {}",
-                            window_average_handled.iter().sum::<f64>() / PATIENCE as f64,
-                            request_rate
-                        )
-                    } else {
-                        // stabilized outside N
-                        info!(
-                            "Requests handled / second saturated around {:.2}, stopping stress test.",
-                            window_average_handled.iter().sum::<f64>() / PATIENCE as f64
+                while behind > 1.0 {
+                    if behind > last_behind + BEHIND_TOLERANCE {
+                        warn!(
+                            "Request \"behind\" count increased: {} -> {}. Use a different machine or close other processes if this continues.",
+                            last_behind, behind
                         );
-                        return;
                     }
-                }
-            } else {
-                max_avg_fulfilled_count = avg_fulfilled;
-                windows_not_increasing = 0;
-            }
+                    last_behind = behind;
+                    // Send request
+                    connection
+                        .send(request_store.get(i % REQUEST_STORE_SIZE).unwrap().clone())
+                        .await
+                        .unwrap();
 
-            last_check = Instant::now();
-            *fulfilled = 0;
+                    i += 1;
+                    behind -= 1.0;
+                }
+
+                tokio::task::yield_now().await;
+            }
+        });
+    }
+
+    // Evaluate performance and stopping condition
+    loop {
+        let mut fulfilled = window_fulfilled_request_count.write().await;
+        let avg_fulfilled = *fulfilled as f64 / EVAL_WINDOW_SECONDS;
+        info!(
+            "Average requests fulfilled per second for current window: {:.2}",
+            avg_fulfilled
+        );
+        if avg_fulfilled < max_avg_fulfilled_count + STABILITY_TOLERANCE {
+            window_average_handled[windows_not_increasing] = avg_fulfilled;
+            windows_not_increasing += 1;
+            if windows_not_increasing >= PATIENCE {
+                // average requests fulfillment rate has stabilized
+                if avg_fulfilled >= request_rate - WITHIN_N_TOLERANCE {
+                    // stabilized around N
+                    request_rate *= 2.0;
+                    windows_not_increasing = 0;
+                    info!(
+                        "Requests handled / second stabilized around {:.2}, increasing request rate to {}",
+                        window_average_handled.iter().sum::<f64>() / PATIENCE as f64,
+                        request_rate
+                    )
+                } else {
+                    // stabilized outside N
+                    info!(
+                        "Requests handled / second saturated around {:.2}, stopping stress test.",
+                        window_average_handled.iter().sum::<f64>() / PATIENCE as f64
+                    );
+                    return;
+                }
+            }
+        } else {
+            max_avg_fulfilled_count = avg_fulfilled;
+            windows_not_increasing = 0;
         }
-        tokio::task::yield_now().await;
+
+        *fulfilled = 0;
+        tokio::time::sleep(Duration::new(EVAL_WINDOW_SECONDS as u64, 0)).await;
     }
 }
