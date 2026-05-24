@@ -7,7 +7,7 @@ use std::{
 };
 
 use log::{error, info, warn};
-use mini_redis_server_rs::Request;
+use mini_redis_rs::Request;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpStream, tcp::OwnedReadHalf},
@@ -15,21 +15,22 @@ use tokio::{
     time::Instant,
 };
 
-const CONNECT_TO: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 3000));
+const CONNECT_TO: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 2, 30), 3000));
 
 const STABILITY_TOLERANCE: f64 = 1000.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 1000.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
 const BEHIND_TOLERANCE: f64 = 1000.0;
-const INITIAL_N: f64 = 30000.0;
+const INITIAL_N: f64 = 600000.0;
 // average requests fulfilled per second will be averaged across this window
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
 const NUM_CONNECTIONS: usize = 16;
 const REQUEST_STORE_SIZE: usize = 1024;
-const BATCH_SIZE: u64 = 256;
+const BATCH_SIZE: u64 = 10000;
 const CATCH_UP_DURATION: Duration = Duration::new(5, 0);
-const BUFFERED_READER_CAP: usize = 4 * 1024;
+const BUFFERED_READER_CAP: usize = 2 * 1024;
 
 #[derive(Debug)]
 pub struct MiniTestStatusSnapshot {
@@ -53,13 +54,13 @@ async fn read_and_dump_result(read_half: &mut BufReader<OwnedReadHalf>) -> Resul
     Ok(n)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 16)]
 // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
 // 1. Connect successfully to server on a consistent machine (get hardware info)
 // 2. Start sending n requests per second and wait for response rate to stabilize
 // 3. If response rate ~ n, double n, else end test and record metrics
 // 4. Plot results using matplotlib
-async fn progressive_stress_test() {
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
+async fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .target(env_logger::Target::Stdout)

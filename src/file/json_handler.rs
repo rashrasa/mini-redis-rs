@@ -25,7 +25,6 @@ impl JsonFileHandler {
             .create(true)
             .write(true)
             .read(true)
-            .share_mode(0)
             .open(path)
             .await
             .unwrap();

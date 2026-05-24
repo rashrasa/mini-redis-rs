@@ -8,8 +8,12 @@
 use std::{sync::Arc, time::Duration};
 
 use clap::Parser;
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::enable_raw_mode,
+};
 use log::{info, warn};
-use mini_redis_server_rs::{
+use mini_redis_rs::{
     Request, ServerState,
     connection::ConnectionHandler,
     file::json_handler::{self, JsonFileHandler},
@@ -60,10 +64,10 @@ async fn main() {
     };
 
     let cancellation_token = tokio_util::sync::CancellationToken::new();
-    let addr = "127.0.0.1:3000";
+    let addr = std::env::var("MINI_REDIS_HOST").unwrap_or("192.168.2.30:3000".into());
     let data = JsonFileHandler::from_path(&data_path).await.unwrap();
     let state = Arc::new(Mutex::new(ServerState { data }));
-    let tcp_listener = TcpListener::bind(addr).await.unwrap();
+    let tcp_listener = TcpListener::bind(addr.clone()).await.unwrap();
 
     let cancellation_token_task = cancellation_token.clone();
 
@@ -93,7 +97,19 @@ async fn main() {
 
     // Wait to terminate
     // tokio::time::sleep(Duration::new(30, 0)).await;
-    tokio::signal::ctrl_c().await.unwrap();
+    // tokio::signal::ctrl_c().await.unwrap();
+    enable_raw_mode().unwrap();
+
+    // TODO: try to find non-blocking solution
+    println!("Press q to close");
+    loop {
+        if let Event::Key(key) = event::read().unwrap() {
+            if key.code == KeyCode::Char('q') {
+                break;
+            }
+        }
+    }
+
     info!("Starting graceful shutdown");
 
     cancellation_token.cancel();

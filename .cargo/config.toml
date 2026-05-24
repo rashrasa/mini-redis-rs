@@ -1,8 +1,5 @@
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
 
-[alias]
-server = "run --package mini-redis-server-rs"
-
 [env]
 MINI_REDIS_PROFILE="true"
