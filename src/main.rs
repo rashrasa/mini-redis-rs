@@ -24,8 +24,10 @@ const ENV_NAME_PROFILE: &str = "MINI_REDIS_PROFILE"; // true -> profile mode, el
 
 // TODO: Accept command-line arguments for testing (timer instead of ctrl-c to close), server config, etc.
 // TODO: memory -> file sync policy
+// TODO: Switch to HTTP
+// TODO: Improve profiling tool to be more visual
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)

@@ -34,7 +34,7 @@ if LOCAL:
     print("Warning: Server specified on local machine, this can skew the results. Continue? (Y/n)")
     if input().strip().lower() != "y":
         print("Test cancelled")
-        stop(1)
+        stop(0)
 
 
-# subprocess.call(['cargo', 'test', '--workspace'])
+subprocess.call(['cargo', 'test'])
