@@ -1,8 +1,6 @@
 use std::{
-    error::Error,
-    io::{BufRead, BufReader, BufWriter, Read, Write},
+    io::{BufRead, BufReader, BufWriter, Write},
     net::TcpStream,
-    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};

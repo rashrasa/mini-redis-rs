@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use log::{debug, info};
+use log::debug;
 use serde_json::Value;
 use tokio::{
     fs::{self, File},

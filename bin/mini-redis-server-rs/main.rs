@@ -5,22 +5,20 @@
 // 4. Listen for insert, read, delete requests
 // 5. Perform operations atomically
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::enable_raw_mode,
 };
 use log::{info, warn};
 use mini_redis_rs::{
-    Request, ServerState,
+    ServerState,
     connection::ConnectionHandler,
     file::json_handler::{self, JsonFileHandler},
 };
 use tokio::select;
 
-use serde_json::{Number, Value};
 use tokio::{net::TcpListener, sync::Mutex, task::JoinSet};
 
 const CONFIG_PATH_STR: &str = "./data/config.json";

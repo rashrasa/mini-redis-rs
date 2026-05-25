@@ -149,6 +149,7 @@ impl ConnectionHandler {
     }
 }
 
+#[cfg(test)]
 mod test {
     use std::net::{Ipv4Addr, SocketAddrV4};
 

@@ -1,12 +1,11 @@
 use core::f64;
 use std::{
-    io::Read,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
-use log::{error, info, warn};
+use log::{info, warn};
 use mini_redis_rs::Request;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -29,22 +28,7 @@ const PATIENCE: usize = 5;
 const NUM_CONNECTIONS: usize = 16;
 const REQUEST_STORE_SIZE: usize = 1024;
 const BATCH_SIZE: u64 = 10000;
-const CATCH_UP_DURATION: Duration = Duration::new(5, 0);
 const BUFFERED_READER_CAP: usize = 2 * 1024;
-
-#[derive(Debug)]
-pub struct MiniTestStatusSnapshot {
-    time: Instant,
-    target_sent_rate: f64,
-    send_rate: f64,
-    response_rate: f64,
-}
-
-#[derive(Debug)]
-pub struct MiniTestResult {
-    start: Instant,
-    snapshots: Vec<MiniTestStatusSnapshot>,
-}
 
 async fn read_and_dump_result(read_half: &mut BufReader<OwnedReadHalf>) -> Result<usize, String> {
     let buf = read_half.fill_buf().await.unwrap();
@@ -98,7 +82,7 @@ async fn main() {
 
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
     let rate_rx_task = rate_rx.clone();
-    for c in 0..NUM_CONNECTIONS {
+    for _ in 0..NUM_CONNECTIONS {
         let mut rate_rx = rate_rx_task.clone();
         let request_store_task = request_store.clone();
         tokio::spawn(async move {
@@ -116,7 +100,6 @@ async fn main() {
                 }
             });
 
-            let mut catch_up_window = tokio::time::interval(CATCH_UP_DURATION);
             let mut behind = 0.0;
             let mut last_behind = f64::MAX;
             let mut last = Instant::now();
@@ -129,20 +112,6 @@ async fn main() {
                 last = Instant::now();
 
                 select! {
-                    // _ = catch_up_window.tick() => {
-                    //     let actual = (request_rate - (last_behind - behind)) / CATCH_UP_DURATION.as_secs_f64();
-                    //     if request_rate > actual {
-                    //         warn!(
-                    //             "Cannot send requests at the desired rate: Expected: {}, Actual: {}",
-                    //             request_rate,
-                    //             actual
-                    //         );
-                    //     }
-
-                    //     last_behind = behind;
-
-
-                    // }
                     _ = async {
                         while behind > BATCH_SIZE as f64 {
                             // Send requests

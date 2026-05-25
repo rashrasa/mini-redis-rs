@@ -7,7 +7,6 @@ use crate::file::json_handler::JsonFileHandler;
 
 pub mod connection;
 pub mod file;
-pub mod profiling;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Request {
@@ -72,6 +71,7 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for Error {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
