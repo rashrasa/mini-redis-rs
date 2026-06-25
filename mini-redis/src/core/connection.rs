@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, io::Write, net::SocketAddr, sync::Arc};
 
+use anyhow::Context;
 use log::{debug, error, info};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -7,7 +8,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use crate::{Request, State, core::Error};
+use crate::{Request, State};
 
 pub struct TcpStreamHandler {
     source: TcpStream,
@@ -23,12 +24,12 @@ impl TcpStreamHandler {
             read_bytes: VecDeque::with_capacity(4096),
         }
     }
-    pub async fn next_request(&mut self) -> Result<Request, Error> {
+    pub async fn next_request(&mut self) -> anyhow::Result<Request> {
         let line: Vec<u8> = {
             loop {
                 let mut line: Option<Vec<u8>> = None;
                 for i in 0..self.read_bytes.len() {
-                    let byte = self.read_bytes.get(i).unwrap();
+                    let byte = self.read_bytes.get(i).context("error getting byte")?;
                     if *byte == b'\n' {
                         line = Some(self.read_bytes.drain(0..=i).collect());
                         break;
@@ -37,15 +38,15 @@ impl TcpStreamHandler {
                 if let Some(l) = line {
                     break l;
                 }
-                self.source.readable().await.unwrap();
+                self.source
+                    .readable()
+                    .await
+                    .context("error waiting for TCPStream to become readable")?;
                 let n = self.source.read(&mut self.buffer).await?;
 
                 if n == 0 {
                     self.shutdown().await;
-                    return Err(Error::StdIoError(std::io::Error::new(
-                        std::io::ErrorKind::ConnectionAborted,
-                        "Unable to read bytes, closing stream.",
-                    )));
+                    return Err(anyhow::Error::msg("Unable to read bytes, closing stream."));
                 }
                 self.read_bytes.write_all(&self.buffer[0..n]).unwrap();
             }
@@ -78,35 +79,15 @@ impl ConnectionHandler {
             let mut tcp_stream_handler = TcpStreamHandler::new(tcp_stream);
 
             loop {
-                let request: Request = {
-                    match tcp_stream_handler.next_request().await {
-                        Ok(req) => req,
-                        Err(error) => match error {
-                            Error::StdIoError(e) => match e.kind() {
-                                std::io::ErrorKind::NotFound
-                                | std::io::ErrorKind::PermissionDenied
-                                | std::io::ErrorKind::ConnectionRefused
-                                | std::io::ErrorKind::ConnectionReset
-                                | std::io::ErrorKind::HostUnreachable
-                                | std::io::ErrorKind::NetworkUnreachable
-                                | std::io::ErrorKind::ConnectionAborted
-                                | std::io::ErrorKind::TimedOut
-                                | std::io::ErrorKind::StorageFull => {
-                                    info!("Stream was closed: {}", e);
-                                    break;
-                                }
-                                _ => {
-                                    let message = format!("Could not parse request {}", e);
-                                    error!("{}", message);
-                                    continue;
-                                }
-                            },
-                            _ => {
-                                let message = format!("Could not parse request {}", error);
-                                error!("{}", message);
-                                continue;
-                            }
-                        },
+                let request = match tcp_stream_handler
+                    .next_request()
+                    .await
+                    .context("could not parse request")
+                {
+                    Ok(req) => req,
+                    Err(e) => {
+                        error!("{}", e);
+                        continue;
                     }
                 };
 
