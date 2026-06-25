@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     State,
-    core::{Configuration, connection::ConnectionHandler, file::json_handler::JsonFileHandler},
+    core::{Configuration, JsonFileHandler, connection::ConnectionHandler},
 };
 
 /// Creates a default config and serves clients.

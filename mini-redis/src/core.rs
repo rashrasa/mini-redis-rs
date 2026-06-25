@@ -1,7 +1,7 @@
 pub mod connection;
-pub mod file;
+pub mod json_handler;
 
-pub use file::JsonFileHandler;
+pub use json_handler::JsonFileHandler;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
