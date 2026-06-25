@@ -1,20 +1,13 @@
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use log::{info, warn};
-use mini_redis::Request;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpStream, tcp::OwnedReadHalf},
-    select,
-    time::Instant,
-};
+use mini_redis::InsertRequest;
+use tokio::{select, time::Instant};
 
-const CONNECT_TO: SocketAddr =
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(192, 168, 2, 30), 3000));
+const API_URL: &str = "http://192.168.2.30:3000/insert";
 
 const STABILITY_TOLERANCE: f64 = 1000.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a previous iteration)
 const WITHIN_N_TOLERANCE: f64 = 1000.0; // Any 'x requests fulfilled' values within this range are considered the same (compared to a specific n)
@@ -26,16 +19,6 @@ const EVAL_WINDOW_SECONDS: f64 = 5.0;
 const PATIENCE: usize = 5;
 const NUM_CONNECTIONS: usize = 16;
 const REQUEST_STORE_SIZE: usize = 1024;
-const BATCH_SIZE: u64 = 10000;
-const BUFFERED_READER_CAP: usize = 2 * 1024;
-
-async fn read_and_dump_result(read_half: &mut BufReader<OwnedReadHalf>) -> Result<usize, String> {
-    let buf = read_half.fill_buf().await.unwrap();
-    let n = buf.iter().filter(|b| **b == b'\n').count();
-    let len = buf.len();
-    read_half.consume(len);
-    Ok(n)
-}
 
 // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
 // 1. Connect successfully to server on a consistent machine (get hardware info)
@@ -58,47 +41,20 @@ async fn main() {
     // warn!("Initializing tokio-console");
     // console_subscriber::init();
 
+    info!("Creating request store and clients");
     let window_sent_count: &'static _ = Box::leak(Box::new(AtomicU64::new(0)));
     let window_response_count: &'static _ = Box::leak(Box::new(AtomicU64::new(0)));
-
-    info!("Creating request store");
-    let mut request_store: Vec<Vec<u8>> = vec![];
-    for _ in 0..REQUEST_STORE_SIZE / NUM_CONNECTIONS {
-        let mut data = vec![];
-        for i in 0..BATCH_SIZE {
-            data.extend(
-                serde_json::to_vec(&Request::Insert(format!("request_{}", i), i.into())).unwrap(),
-            );
-            data.push(b'\n');
-        }
-        request_store.push(data);
-    }
-
-    // Declared here since send tasks start here.
-    let mut eval_interval = tokio::time::interval(Duration::from_secs_f64(EVAL_WINDOW_SECONDS));
+    let client: &'static _ = Box::leak(Box::new(reqwest::Client::new()));
+    let request_store: &'static _ = Box::leak(Box::new(create_request_store()));
 
     let (rate_tx, rate_rx) = tokio::sync::watch::channel(INITIAL_N / NUM_CONNECTIONS as f64);
-
     info!("Connecting to server with {} instances", NUM_CONNECTIONS);
+
     let rate_rx_task = rate_rx.clone();
     for _ in 0..NUM_CONNECTIONS {
         let mut rate_rx = rate_rx_task.clone();
-        let request_store_task = request_store.clone();
         tokio::spawn(async move {
-            let request_store = request_store_task;
-
             let mut k: usize = 0;
-
-            let (reader, mut writer) = TcpStream::connect(CONNECT_TO).await.unwrap().into_split();
-
-            tokio::spawn(async move {
-                let mut reader = BufReader::with_capacity(BUFFERED_READER_CAP, reader);
-                loop {
-                    let r = read_and_dump_result(&mut reader).await.unwrap();
-                    window_response_count.fetch_add(r as u64, Ordering::Relaxed);
-                }
-            });
-
             let mut behind = 0.0;
             let mut last_behind = f64::MAX;
             let mut last = Instant::now();
@@ -109,18 +65,18 @@ async fn main() {
             loop {
                 behind += last.elapsed().as_secs_f64() * request_rate;
                 last = Instant::now();
-
                 select! {
                     _ = async {
-                        while behind > BATCH_SIZE as f64 {
-                            // Send requests
+                        while behind > 1.0 {
                             let req_i = k % (REQUEST_STORE_SIZE / NUM_CONNECTIONS);
-                            let request = &request_store[req_i];
-                            writer.write_all(request).await.unwrap();
+                            let request: &[u8] = &request_store[req_i];
+                            let request = client.post(API_URL).body(request).build().unwrap();
+                            client.execute(request).await.unwrap();
+                            window_response_count.fetch_add(1, Ordering::Relaxed);
                             k += 1;
 
-                            behind -= BATCH_SIZE as f64;
-                            window_sent_count.fetch_add(BATCH_SIZE, Ordering::Relaxed);
+                            behind -= 1.0;
+                            window_sent_count.fetch_add(1, Ordering::Relaxed);
                         }
                         last_behind = behind;
                     } => {}
@@ -134,6 +90,9 @@ async fn main() {
     }
 
     info!("Starting stress test at {} requests per second", INITIAL_N);
+
+    // Declared here since send tasks start here.
+    let mut eval_interval = tokio::time::interval(Duration::from_secs_f64(EVAL_WINDOW_SECONDS));
 
     // Evaluation task
     let mut sent: u64 = 0;
@@ -206,4 +165,18 @@ async fn main() {
         }
     }
     println!("Total Sent: {}\n Total Received: {}", sent, received);
+}
+
+fn create_request_store() -> Vec<Vec<u8>> {
+    let mut request_store: Vec<Vec<u8>> = vec![];
+    for i in 0..REQUEST_STORE_SIZE / NUM_CONNECTIONS {
+        request_store.push(
+            serde_json::to_vec(&InsertRequest {
+                key: format!("request_{}", i),
+                value: i.into(),
+            })
+            .unwrap(),
+        );
+    }
+    request_store
 }

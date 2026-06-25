@@ -1,19 +1,16 @@
 use std::{path::Path, sync::Arc};
 
 use anyhow::Context;
-use log::{debug, error, info};
+use axum::{Json, Router, extract::State, routing};
+use log::info;
 use tokio::{
     fs::{File, create_dir_all, try_exists},
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    select,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    State,
-    core::{Configuration, JsonFileHandler, connection::ConnectionHandler},
-};
+use crate::core::{Configuration, JsonFileHandler};
 
 /// Creates a default config and serves clients.
 pub async fn serve(host: &str, cancellation_token: CancellationToken) -> anyhow::Result<()> {
@@ -82,34 +79,58 @@ pub async fn serve_from_file(
             "failed to read data file from {}",
             &config.data_path
         ))?;
-    let state = Arc::new(State { data });
-    let tcp_listener = TcpListener::bind(host)
+    let listener = TcpListener::bind(host)
         .await
         .context(format!("failed to bind to {}", host))?;
-    let state_task = state.clone();
-    let state = state_task;
-    info!("listening @ {}", host);
 
-    loop {
-        select! {
-            result = tcp_listener.accept() => {
-                let (tcp_stream, tcp_addr) = match result {
-                Ok(v) => v,
-                Err(e) => {
-                    error!("{}", anyhow::Error::from(e).context("connection failed"));
-                    continue;
-                }
-                };
-                ConnectionHandler::spawn(tcp_stream, tcp_addr, state.clone()).await;
-            }
-            _ = cancellation_token.cancelled() => {
-                debug!("server closing");
-                break;
-            }
-        }
-    }
+    let state = Arc::new(crate::State { data });
+
+    let router = Router::new()
+        .route("/read", routing::get(read))
+        .route("/insert", routing::post(insert))
+        .route("/delete", routing::delete(delete))
+        .with_state(Arc::clone(&state));
+
+    info!("listening @ {}", host);
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move { cancellation_token.cancelled().await })
+        .await
+        .context("server error")?;
 
     state.sync().await;
 
     Ok(())
+}
+
+#[axum::debug_handler]
+async fn insert(
+    State(s): State<Arc<crate::State>>,
+    Json(payload): Json<crate::InsertRequest>,
+) -> String {
+    match s.data.write(&payload.key, payload.value).await {
+        Some(old) => format!("Old value: {}", old),
+        None => String::from("null"),
+    }
+}
+
+#[axum::debug_handler]
+async fn read(
+    State(s): State<Arc<crate::State>>,
+    Json(payload): Json<crate::InsertRequest>,
+) -> String {
+    match s.data.read(&payload.key).await {
+        Some(v) => format!("{}", v),
+        None => String::from("null"),
+    }
+}
+
+#[axum::debug_handler]
+async fn delete(
+    State(s): State<Arc<crate::State>>,
+    Json(payload): Json<crate::InsertRequest>,
+) -> String {
+    match s.data.delete(&payload.key).await {
+        Some(v) => format!("{}", v),
+        None => String::from("null"),
+    }
 }
