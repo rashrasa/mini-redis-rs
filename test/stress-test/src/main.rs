@@ -69,7 +69,7 @@ async fn main() {
             data.extend(
                 serde_json::to_vec(&Request::Insert(format!("request_{}", i), i.into())).unwrap(),
             );
-            data.push('\n' as u8);
+            data.push(b'\n');
         }
         request_store.push(data);
     }
@@ -116,7 +116,7 @@ async fn main() {
                             // Send requests
                             let req_i = k % (REQUEST_STORE_SIZE / NUM_CONNECTIONS);
                             let request = &request_store[req_i];
-                            writer.write_all(&request).await.unwrap();
+                            writer.write_all(request).await.unwrap();
                             k += 1;
 
                             behind -= BATCH_SIZE as f64;
