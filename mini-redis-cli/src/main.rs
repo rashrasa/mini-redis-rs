@@ -12,7 +12,7 @@ use crossterm::{
     terminal::enable_raw_mode,
 };
 use log::{info, warn};
-use mini_redis_rs::{
+use mini_redis::{
     ServerState,
     connection::ConnectionHandler,
     file::json_handler::{self, JsonFileHandler},

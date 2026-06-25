@@ -1,4 +1,3 @@
-use core::f64;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::atomic::{AtomicU64, Ordering},
@@ -6,7 +5,7 @@ use std::{
 };
 
 use log::{info, warn};
-use mini_redis_rs::Request;
+use mini_redis::Request;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{TcpStream, tcp::OwnedReadHalf},
