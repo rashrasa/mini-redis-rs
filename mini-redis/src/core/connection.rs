@@ -6,9 +6,8 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
 };
-use tokio_util::{future::FutureExt, sync::CancellationToken};
 
-use crate::{Error, Request, ServerState};
+use crate::{Error, Request, State};
 
 pub struct TcpStreamHandler {
     source: TcpStream,
@@ -19,7 +18,7 @@ pub struct TcpStreamHandler {
 impl TcpStreamHandler {
     pub fn new(source: TcpStream) -> Self {
         Self {
-            source: source,
+            source,
             buffer: [0; 1024],
             read_bytes: VecDeque::with_capacity(4096),
         }
@@ -30,7 +29,7 @@ impl TcpStreamHandler {
                 let mut line: Option<Vec<u8>> = None;
                 for i in 0..self.read_bytes.len() {
                     let byte = self.read_bytes.get(i).unwrap();
-                    if *byte == '\n' as u8 {
+                    if *byte == b'\n' {
                         line = Some(self.read_bytes.drain(0..=i).collect());
                         break;
                     }
@@ -48,7 +47,7 @@ impl TcpStreamHandler {
                         "Unable to read bytes, closing stream.",
                     )));
                 }
-                self.read_bytes.write_all(&mut self.buffer[0..n]).unwrap();
+                self.read_bytes.write_all(&self.buffer[0..n]).unwrap();
             }
         };
 
@@ -70,14 +69,9 @@ impl TcpStreamHandler {
 }
 pub struct ConnectionHandler;
 impl ConnectionHandler {
-    /// Spawns a tokio task which handles this connection and can be managed with [cancellation_token].
-    pub async fn spawn(
-        tcp_stream: TcpStream,
-        tcp_addr: SocketAddr,
-        state: Arc<Mutex<ServerState>>,
-        cancellation_token: &CancellationToken,
-    ) {
-        let _ = tokio::spawn(async move {
+    /// Spawns a tokio task which handles this connection.
+    pub async fn spawn(tcp_stream: TcpStream, tcp_addr: SocketAddr, state: Arc<Mutex<State>>) {
+        tokio::spawn(async move {
             // Handle each connection
             info!("Received new connection: {}", tcp_addr);
 
@@ -144,8 +138,7 @@ impl ConnectionHandler {
                     return;
                 }
             }
-        })
-        .with_cancellation_token(cancellation_token);
+        });
     }
 }
 
@@ -179,8 +172,8 @@ mod test {
     async fn next_request_parses_simple_request() {
         let req = Request::Read("test\n".into());
         let mut data = serde_json::to_vec(&req).unwrap();
-        data.push('\n' as u8);
-        let mut handler = TcpStreamHandler::new(create_mock_source(&mut data, 12345).await);
+        data.push(b'\n');
+        let mut handler = TcpStreamHandler::new(create_mock_source(&data, 12345).await);
 
         assert_eq!(handler.next_request().await.unwrap(), req);
         handler.shutdown().await;

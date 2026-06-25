@@ -23,6 +23,7 @@ impl JsonFileHandler {
         // Keep file open until shutdown
         let config_file = fs::File::options()
             .create(true)
+            .truncate(false)
             .write(true)
             .read(true)
             .open(path)
@@ -39,7 +40,7 @@ impl JsonFileHandler {
         let file = reader.into_inner();
 
         Ok(Self {
-            file: file,
+            file,
             data: Arc::new(RwLock::new(data)),
         })
     }

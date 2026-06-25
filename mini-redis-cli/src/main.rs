@@ -1,25 +1,10 @@
-// HIGH LEVEL
-// 1. Read config file and initialize config struct
-// 2. Lock database file (json file) and keep it open during entire run
-// 3. Accept socket connections and spawn a task for each and close appropriately
-// 4. Listen for insert, read, delete requests
-// 5. Perform operations atomically
-
-use std::sync::Arc;
-
+use anyhow::Context;
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::enable_raw_mode,
 };
 use log::{info, warn};
-use mini_redis::{
-    ServerState,
-    connection::ConnectionHandler,
-    file::json_handler::{self, JsonFileHandler},
-};
-use tokio::select;
-
-use tokio::{net::TcpListener, sync::Mutex, task::JoinSet};
+use mini_redis::serve_from_file;
 
 const CONFIG_PATH_STR: &str = "./data/config.json";
 const ENV_NAME_PROFILE: &str = "MINI_REDIS_PROFILE"; // true -> profile mode, else -> not profile mode
@@ -30,9 +15,9 @@ const ENV_NAME_PROFILE: &str = "MINI_REDIS_PROFILE"; // true -> profile mode, el
 // TODO: Improve profiling tool to be more visual
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 16)]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Debug)
         .target(env_logger::Target::Stdout)
         .init();
 
@@ -48,49 +33,15 @@ async fn main() {
         console_subscriber::init();
     }
 
-    info!("Reading config");
-    let mut config = json_handler::JsonFileHandler::from_path(CONFIG_PATH_STR)
-        .await
-        .unwrap();
-
-    let data_path = match config.read("data_path_abs").await {
-        Some(path) => match path {
-            serde_json::Value::String(s) => s,
-            _ => "data/data.json".into(),
-        },
-        None => "data/data.json".into(),
-    };
-
     let cancellation_token = tokio_util::sync::CancellationToken::new();
+
     let addr = std::env::var("MINI_REDIS_HOST").unwrap_or("192.168.2.30:3000".into());
-    let data = JsonFileHandler::from_path(&data_path).await.unwrap();
-    let state = Arc::new(Mutex::new(ServerState { data }));
-    let tcp_listener = TcpListener::bind(addr.clone()).await.unwrap();
 
-    let cancellation_token_task = cancellation_token.clone();
-
-    let state_task = state.clone();
-    let _ = tokio::spawn(async move {
-        let state = state_task;
-        let cancellation_token = cancellation_token_task;
-
-        info!("Completed startup");
-        info!("Listening @ {}", addr);
-        info!(
-            "Try sending an Insert request using the client or with raw TCP with {{Insert: [\"<key>\", <value>]}}"
-        );
-        loop {
-            select! {
-                // Accept new connections
-                result = tcp_listener.accept() => {
-                    let (tcp_stream, tcp_addr) = result.unwrap();
-                    ConnectionHandler::spawn(tcp_stream, tcp_addr, state.clone(), &cancellation_token).await;
-                }
-                _ = cancellation_token.cancelled() => {
-                    break;
-                }
-            };
-        }
+    let cancellation_token_serve = cancellation_token.clone();
+    let handle = tokio::spawn(async move {
+        serve_from_file(CONFIG_PATH_STR, &addr, cancellation_token_serve)
+            .await
+            .context("failed to start server")
     });
 
     // Wait to terminate
@@ -101,23 +52,18 @@ async fn main() {
     // TODO: try to find non-blocking solution
     println!("Press q to close");
     loop {
-        if let Event::Key(key) = event::read().unwrap() {
-            if key.code == KeyCode::Char('q') {
-                break;
-            }
+        if let Event::Key(key) = event::read().context("could not read keyboard input")?
+            && key.code == KeyCode::Char('q')
+        {
+            break;
         }
     }
 
-    info!("Starting graceful shutdown");
+    info!("starting graceful shutdown");
 
     cancellation_token.cancel();
 
-    state.lock().await.sync().await;
-
-    let mut js = JoinSet::new();
-
-    js.spawn(async move {
-        config.close().await;
-    });
-    js.join_all().await;
+    handle
+        .await
+        .context("failed to wait for serve task cleanup")?
 }

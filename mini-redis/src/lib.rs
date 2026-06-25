@@ -3,10 +3,12 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::file::json_handler::JsonFileHandler;
+pub mod core;
+pub mod server;
 
-pub mod connection;
-pub mod file;
+pub use server::{serve, serve_from_file};
+
+use crate::core::JsonFileHandler;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Request {
@@ -15,11 +17,11 @@ pub enum Request {
     Read(String),
 }
 
-pub struct ServerState {
+pub struct State {
     pub data: JsonFileHandler,
 }
 
-impl ServerState {
+impl State {
     pub async fn write(&mut self, key: &str, value: Value) -> Option<Value> {
         self.data.write(key, value).await
     }
