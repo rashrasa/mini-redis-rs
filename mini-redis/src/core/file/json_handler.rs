@@ -1,5 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, path::Path, sync::Arc};
 
+use anyhow::Context;
 use log::debug;
 use serde_json::Value;
 use tokio::{
@@ -16,9 +17,19 @@ pub struct JsonFileHandler {
 
 // Create
 impl JsonFileHandler {
-    pub async fn from_path(path: &str) -> Result<JsonFileHandler, tokio::io::Error> {
-        let path = std::path::Path::new(path);
-        fs::create_dir_all(path.parent().unwrap()).await.unwrap();
+    pub async fn from_path(path: impl AsRef<Path>) -> anyhow::Result<JsonFileHandler> {
+        let path = path.as_ref();
+        let parent_dir = path.parent().context(format!(
+            "could not read parent directory of path {:?}",
+            path
+        ))?;
+
+        if let Err(e) = fs::create_dir_all(parent_dir).await {
+            match e.kind() {
+                ErrorKind::AlreadyExists => {}
+                _ => return Err(anyhow::Error::context(e.into(), "Failed")),
+            }
+        }
 
         // Keep file open until shutdown
         let config_file = fs::File::options()
@@ -28,7 +39,7 @@ impl JsonFileHandler {
             .read(true)
             .open(path)
             .await
-            .unwrap();
+            .context(format!("could not open file at {:?}", path))?;
 
         let mut reader = BufReader::new(config_file);
         reader.fill_buf().await.unwrap();

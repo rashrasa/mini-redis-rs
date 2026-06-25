@@ -4,9 +4,8 @@ use crossterm::{
     terminal::enable_raw_mode,
 };
 use log::{info, warn};
-use mini_redis::serve_from_file;
+use mini_redis::serve;
 
-const CONFIG_PATH_STR: &str = "./data/config.json";
 const ENV_NAME_PROFILE: &str = "MINI_REDIS_PROFILE"; // true -> profile mode, else -> not profile mode
 
 // TODO: Accept command-line arguments for testing (timer instead of ctrl-c to close), server config, etc.
@@ -39,9 +38,10 @@ async fn main() -> anyhow::Result<()> {
 
     let cancellation_token_serve = cancellation_token.clone();
     let handle = tokio::spawn(async move {
-        serve_from_file(CONFIG_PATH_STR, &addr, cancellation_token_serve)
+        serve(&addr, cancellation_token_serve)
             .await
             .context("failed to start server")
+            .unwrap();
     });
 
     // Wait to terminate
@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     cancellation_token.cancel();
 
-    handle
-        .await
-        .context("failed to wait for serve task cleanup")?
+    handle.await.context("task failed")?;
+
+    Ok(())
 }
