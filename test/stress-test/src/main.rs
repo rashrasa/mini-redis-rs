@@ -5,6 +5,7 @@ use std::{
 
 use log::{info, warn};
 use mini_redis::InsertRequest;
+use reqwest::Client;
 use tokio::{select, time::Instant};
 
 const API_URL: &str = "http://192.168.2.30:3000/insert";
@@ -44,7 +45,6 @@ async fn main() {
     info!("Creating request store and clients");
     let window_sent_count: &'static _ = Box::leak(Box::new(AtomicU64::new(0)));
     let window_response_count: &'static _ = Box::leak(Box::new(AtomicU64::new(0)));
-    let client: &'static _ = Box::leak(Box::new(reqwest::Client::new()));
     let request_store: &'static _ = Box::leak(Box::new(create_request_store()));
 
     let (rate_tx, rate_rx) = tokio::sync::watch::channel(INITIAL_N / NUM_CONNECTIONS as f64);
@@ -54,6 +54,7 @@ async fn main() {
     for _ in 0..NUM_CONNECTIONS {
         let mut rate_rx = rate_rx_task.clone();
         tokio::spawn(async move {
+            let client = Client::new();
             let mut k: usize = 0;
             let mut behind = 0.0;
             let mut last_behind = f64::MAX;
