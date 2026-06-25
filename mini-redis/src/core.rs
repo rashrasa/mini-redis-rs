@@ -1,8 +1,6 @@
 pub mod connection;
 pub mod json_handler;
 
-use std::fmt::Display;
-
 pub use json_handler::JsonFileHandler;
 use serde::{Deserialize, Serialize};
 
