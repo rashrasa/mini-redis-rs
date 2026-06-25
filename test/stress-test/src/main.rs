@@ -5,7 +5,7 @@ use std::{
 
 use log::{info, warn};
 use mini_redis::InsertRequest;
-use reqwest::{Client, Request};
+use reqwest::Client;
 use tokio::{select, time::Instant};
 
 const API_URL: &str = "http://192.168.2.30:3000/insert";
@@ -18,7 +18,7 @@ const INITIAL_N: f64 = 600000.0;
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 1;
+const NUM_CONNECTIONS: usize = 128;
 const REQUEST_STORE_SIZE: usize = 1024;
 
 // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
@@ -72,18 +72,14 @@ async fn main() {
                     _ = async {
                         while behind > 1.0 {
                             let req_i = k % (REQUEST_STORE_SIZE / NUM_CONNECTIONS);
-                            tokio::spawn(async move {
-                                let request: &[u8] = &request_store[req_i];
-                                let request = client.post(API_URL).body(request).build().unwrap();
-                                send_request(
-                                    request,
-                                    client,
-                                    window_response_count,
-                                    window_sent_count
-                                ).await;
-                            });
+                            let request: &[u8] = &request_store[req_i];
+                            let request = client.post(API_URL).body(request).build().unwrap();
+                            client.execute(request).await.unwrap();
+                            window_response_count.fetch_add(1, Ordering::Relaxed);
+
                             k += 1;
                             behind -= 1.0;
+                            window_sent_count.fetch_add(1, Ordering::Relaxed);
                         }
                         last_behind = behind;
                     } => {}
@@ -186,16 +182,4 @@ fn create_request_store() -> Vec<Vec<u8>> {
         );
     }
     request_store
-}
-
-async fn send_request(
-    request: Request,
-    client: &Client,
-    window_response_count: &AtomicU64,
-    window_sent_count: &AtomicU64,
-) {
-    client.execute(request).await.unwrap();
-    window_response_count.fetch_add(1, Ordering::Relaxed);
-
-    window_sent_count.fetch_add(1, Ordering::Relaxed);
 }
