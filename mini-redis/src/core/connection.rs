@@ -5,7 +5,6 @@ use log::{debug, error, info};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::Mutex,
 };
 
 use crate::{Request, State};
@@ -71,7 +70,7 @@ impl TcpStreamHandler {
 pub struct ConnectionHandler;
 impl ConnectionHandler {
     /// Spawns a tokio task which handles this connection.
-    pub async fn spawn(tcp_stream: TcpStream, tcp_addr: SocketAddr, state: Arc<Mutex<State>>) {
+    pub async fn spawn(tcp_stream: TcpStream, tcp_addr: SocketAddr, state: Arc<State>) {
         tokio::spawn(async move {
             // Handle each connection
             info!("Received new connection: {}", tcp_addr);
@@ -94,21 +93,17 @@ impl ConnectionHandler {
                 let response = match request {
                     Request::Insert(key, value) => {
                         "Old Value: ".to_string()
-                            + &serde_json::to_string_pretty(
-                                &state.lock().await.write(&key, value).await,
-                            )
-                            .unwrap()
+                            + &serde_json::to_string_pretty(&state.write(&key, value).await)
+                                .unwrap()
                             + "\n"
                     }
                     Request::Delete(key) => {
                         "Old Value: ".to_string()
-                            + &serde_json::to_string_pretty(&state.lock().await.delete(&key).await)
-                                .unwrap()
+                            + &serde_json::to_string_pretty(&state.delete(&key).await).unwrap()
                             + "\n"
                     }
                     Request::Read(key) => {
-                        serde_json::to_string_pretty(&state.lock().await.read(&key).await).unwrap()
-                            + "\n"
+                        serde_json::to_string_pretty(&state.read(&key).await).unwrap() + "\n"
                     }
                 };
                 if let Err(e) = tcp_stream_handler.write_all((response).as_bytes()).await {

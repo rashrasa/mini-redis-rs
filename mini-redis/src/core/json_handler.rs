@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::ErrorKind, path::Path, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, path::Path};
 
 use anyhow::Context;
 use log::debug;
@@ -6,13 +6,13 @@ use serde_json::Value;
 use tokio::{
     fs::{self, File},
     io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader},
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 
 /// Handles JSON files. Allows reading, writing, deleting keys.
 pub struct JsonFileHandler {
-    data: Arc<RwLock<HashMap<String, Value>>>,
-    file: File,
+    data: RwLock<HashMap<String, Value>>,
+    file: Mutex<File>,
 }
 
 // Create
@@ -51,36 +51,41 @@ impl JsonFileHandler {
         let file = reader.into_inner();
 
         Ok(Self {
-            file,
-            data: Arc::new(RwLock::new(data)),
+            file: Mutex::new(file),
+            data: RwLock::new(data),
         })
     }
 }
 
 // Operations
 impl JsonFileHandler {
-    pub async fn write(&mut self, key: &str, value: Value) -> Option<Value> {
+    pub async fn write(&self, key: &str, value: Value) -> Option<Value> {
         self.data.write().await.insert(key.to_string(), value)
     }
 
-    pub async fn read(&mut self, key: &str) -> Option<Value> {
+    pub async fn read(&self, key: &str) -> Option<Value> {
         self.data.read().await.get(key).cloned()
     }
 
-    pub async fn delete(&mut self, key: &str) -> Option<Value> {
+    pub async fn delete(&self, key: &str) -> Option<Value> {
         self.data.write().await.remove(key)
     }
 
-    pub async fn sync(&mut self) {
-        let data = serde_json::to_vec_pretty(&(*self.data.read().await)).unwrap();
-        self.file.set_len(0).await.unwrap();
-        self.file.rewind().await.unwrap();
-        self.file.write_all(&data).await.unwrap();
-        self.file.flush().await.unwrap();
+    pub async fn sync(&self) {
+        let mut file = self.file.lock().await;
+        let data = self.data.read().await.clone();
+        let bytes = serde_json::to_vec_pretty(&data).unwrap();
+
+        file.set_len(0).await.unwrap();
+        file.rewind().await.unwrap();
+        file.write_all(&bytes).await.unwrap();
+        file.flush().await.unwrap();
     }
 
-    pub async fn close(&mut self) {
-        self.file.flush().await.unwrap();
-        self.file.shutdown().await.unwrap();
+    pub async fn close(&self) {
+        let mut file = self.file.lock().await;
+
+        file.flush().await.unwrap();
+        file.shutdown().await.unwrap();
     }
 }

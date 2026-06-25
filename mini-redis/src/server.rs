@@ -7,7 +7,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     select,
-    sync::Mutex,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -83,7 +82,7 @@ pub async fn serve_from_file(
             "failed to read data file from {}",
             &config.data_path
         ))?;
-    let state = Arc::new(Mutex::new(State { data }));
+    let state = Arc::new(State { data });
     let tcp_listener = TcpListener::bind(host)
         .await
         .context(format!("failed to bind to {}", host))?;
@@ -110,7 +109,7 @@ pub async fn serve_from_file(
         }
     }
 
-    state.lock().await.sync().await;
+    state.sync().await;
 
     Ok(())
 }

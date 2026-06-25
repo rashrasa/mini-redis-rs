@@ -20,19 +20,19 @@ pub struct State {
 }
 
 impl State {
-    pub async fn write(&mut self, key: &str, value: Value) -> Option<Value> {
+    pub async fn write(&self, key: &str, value: Value) -> Option<Value> {
         self.data.write(key, value).await
     }
 
-    pub async fn read(&mut self, key: &str) -> Option<Value> {
+    pub async fn read(&self, key: &str) -> Option<Value> {
         self.data.read(key).await
     }
 
-    pub async fn delete(&mut self, key: &str) -> Option<Value> {
+    pub async fn delete(&self, key: &str) -> Option<Value> {
         self.data.delete(key).await
     }
 
-    pub async fn sync(&mut self) {
+    pub async fn sync(&self) {
         self.data.sync().await;
     }
 }
