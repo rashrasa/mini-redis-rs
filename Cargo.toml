@@ -6,3 +6,4 @@ default-members = ["mini-redis-cli"]
 
 [profile.release]
 opt-level = 3
+debug = true
