@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+console-subscriber = "0.5.0"
 env_logger = "0.11.11"
 log = "0.4.33"
 mini-redis = { path = "../../mini-redis" }

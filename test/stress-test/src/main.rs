@@ -5,7 +5,7 @@ use std::{
 
 use log::{info, warn};
 use mini_redis::InsertRequest;
-use reqwest::Client;
+use reqwest::{Client, Request};
 use tokio::{select, time::Instant};
 
 const API_URL: &str = "http://192.168.2.30:3000/insert";
@@ -18,7 +18,7 @@ const INITIAL_N: f64 = 600000.0;
 const EVAL_WINDOW_SECONDS: f64 = 5.0;
 // number of consecutive stable evaluation windows before deciding that requests handled / sec has stabilized
 const PATIENCE: usize = 5;
-const NUM_CONNECTIONS: usize = 16;
+const NUM_CONNECTIONS: usize = 1;
 const REQUEST_STORE_SIZE: usize = 1024;
 
 // PURPOSE: This is for evaluating the performance of mini-redis-server-rs. It does not test for correct values after all the inserts.
@@ -32,6 +32,8 @@ async fn main() {
         .filter_level(log::LevelFilter::Info)
         .target(env_logger::Target::Stdout)
         .init();
+
+    console_subscriber::init();
 
     // HOW IT WORKS:
     //
@@ -54,7 +56,7 @@ async fn main() {
     for _ in 0..NUM_CONNECTIONS {
         let mut rate_rx = rate_rx_task.clone();
         tokio::spawn(async move {
-            let client = Client::new();
+            let client: &'static _ = Box::leak(Box::new(Client::new()));
             let mut k: usize = 0;
             let mut behind = 0.0;
             let mut last_behind = f64::MAX;
@@ -70,14 +72,18 @@ async fn main() {
                     _ = async {
                         while behind > 1.0 {
                             let req_i = k % (REQUEST_STORE_SIZE / NUM_CONNECTIONS);
-                            let request: &[u8] = &request_store[req_i];
-                            let request = client.post(API_URL).body(request).build().unwrap();
-                            client.execute(request).await.unwrap();
-                            window_response_count.fetch_add(1, Ordering::Relaxed);
+                            tokio::spawn(async move {
+                                let request: &[u8] = &request_store[req_i];
+                                let request = client.post(API_URL).body(request).build().unwrap();
+                                send_request(
+                                    request,
+                                    client,
+                                    window_response_count,
+                                    window_sent_count
+                                ).await;
+                            });
                             k += 1;
-
                             behind -= 1.0;
-                            window_sent_count.fetch_add(1, Ordering::Relaxed);
                         }
                         last_behind = behind;
                     } => {}
@@ -180,4 +186,16 @@ fn create_request_store() -> Vec<Vec<u8>> {
         );
     }
     request_store
+}
+
+async fn send_request(
+    request: Request,
+    client: &Client,
+    window_response_count: &AtomicU64,
+    window_sent_count: &AtomicU64,
+) {
+    client.execute(request).await.unwrap();
+    window_response_count.fetch_add(1, Ordering::Relaxed);
+
+    window_sent_count.fetch_add(1, Ordering::Relaxed);
 }

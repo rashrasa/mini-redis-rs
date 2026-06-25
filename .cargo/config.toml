@@ -2,4 +2,4 @@
 rustflags = ["--cfg", "tokio_unstable"]
 
 [env]
-MINI_REDIS_PROFILE="true"
+MINI_REDIS_PROFILE="false"

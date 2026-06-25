@@ -2177,6 +2177,7 @@ name = "stress-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console-subscriber",
  "env_logger",
  "log",
  "mini-redis",
